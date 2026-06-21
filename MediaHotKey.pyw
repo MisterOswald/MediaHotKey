@@ -1,4 +1,3 @@
-#!/usr/bin/env pythonw
 """
 No-console launcher for MediaHotKey.
 
