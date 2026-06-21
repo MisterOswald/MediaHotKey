@@ -79,6 +79,7 @@ class Api:
         self._np_last_spotify = None
         self._np_last_spotify_t = 0.0
         self._np_misses = 0
+        self._np_art_by_track = {}   # {"title|artist": art_url} — stable cover
         self._np_thread = threading.Thread(target=self._np_loop, daemon=True)
         self._np_thread.start()
 
@@ -94,21 +95,49 @@ class Api:
         Web API (covers playback on remote devices)."""
         while not self._np_stop.is_set():
             np = None
-            if MEDIA_AVAILABLE:
-                np = self.engine.read_media_now_playing()
             now = time.time()
             spec = self.config.get("spotify", {})
-            # Only hit the Web API if the user has already authorized once
-            # (token cache present) — never trigger an interactive login here.
-            if (np is None and spec.get("client_id") and spec.get("client_secret")
-                    and os.path.exists(token_cache_path())):
-                # Throttle Web API calls (~ every 4s) and reuse between checks.
-                if now - self._np_last_spotify_t >= 4:
+            # Only hit the Web API if the user has authorized once (token cache
+            # present) — never trigger an interactive login from here.
+            can_spotify = bool(spec.get("client_id") and spec.get("client_secret")
+                               and os.path.exists(token_cache_path()))
+
+            def _spotify():
+                # Throttled (~3s) + reused between checks.
+                if now - self._np_last_spotify_t >= 3:
                     self._np_last_spotify_t = now
                     self._np_last_spotify = self.engine.read_spotify_now_playing()
-                np = self._np_last_spotify
+                return self._np_last_spotify
+
+            if self.engine.mode == "spotify":
+                # Spotify mode → Web API first (reliable cover + metadata),
+                # SMTC only if the Web API has nothing.
+                if can_spotify:
+                    np = _spotify()
+                if np is None and MEDIA_AVAILABLE:
+                    np = self.engine.read_media_now_playing()
+            else:
+                # Media mode → SMTC first, Web API as a fallback.
+                if MEDIA_AVAILABLE:
+                    np = self.engine.read_media_now_playing()
+                if np is None and can_spotify:
+                    np = _spotify()
+
             if np:
-                np["fetched_at"] = int(now * 1000)
+                # Lock the cover art to the first one we get for this track so
+                # it can't flip (SMTC data-URL vs Spotify https URL) or blink
+                # out when one source momentarily lacks art.
+                key = (np.get("title") or "") + "|" + (np.get("artist") or "")
+                if np.get("art_url"):
+                    if key not in self._np_art_by_track:
+                        self._np_art_by_track = {key: np["art_url"]}
+                    np["art_url"] = self._np_art_by_track.get(key) or np["art_url"]
+                elif key in self._np_art_by_track:
+                    np["art_url"] = self._np_art_by_track[key]
+                # fetched_at is set by the reader (when the position was
+                # measured) so the JS progress bar extrapolates correctly even
+                # across the throttled Spotify reads — don't overwrite it here.
+                np.setdefault("fetched_at", int(now * 1000))
                 self.engine.now_playing = np
                 self._np_misses = 0
             else:

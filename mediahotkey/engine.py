@@ -521,6 +521,7 @@ class Engine:
             "title": title or "Unknown", "artist": artist, "art_url": art_url,
             "progress_ms": progress_ms, "duration_ms": duration_ms,
             "is_playing": is_playing, "source": "media",
+            "fetched_at": int(time.time() * 1000),
         }
 
     def read_media_now_playing(self):
@@ -548,6 +549,7 @@ class Engine:
             "duration_ms": track.get("duration_ms") or 0,
             "is_playing": pb.get("is_playing", False),
             "source": "spotify",
+            "fetched_at": int(time.time() * 1000),
         }
 
     def media_control(self, action, label):
