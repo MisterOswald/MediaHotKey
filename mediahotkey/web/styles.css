@@ -1,6 +1,7 @@
 /* MediaHotKey — "Lo-fi Café" UI. Tokens taken verbatim from the design spec. */
 
-@import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+/* Fonts are bundled locally (assets/fetch_fonts.py) so the app runs offline. */
+@import url('fonts.css');
 
 :root {
   --paper: #F6EFE1;

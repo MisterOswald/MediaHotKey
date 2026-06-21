@@ -30,6 +30,8 @@ art, progress and transport controls.
 
 The UI is HTML/CSS/JS rendered in a native window via **pywebview**; the Python
 **engine** does the actual hotkey / Spotify / media work behind a small JS bridge.
+The Zen Maru Gothic / JetBrains Mono fonts are **bundled locally** (in
+`mediahotkey/web/fonts/`), so the app looks right with **no internet connection**.
 
 > 👀 **Want to see the design first?** Just open `mediahotkey/web/index.html` in
 > any browser — it renders with demo data, no Python required.
@@ -154,7 +156,8 @@ MediaHotKey/
 ├── requirements.txt
 ├── assets/
 │   ├── icon.ico           # app / window / exe icon
-│   └── make_icon.py       # regenerates the icon + web logo
+│   ├── make_icon.py       # regenerates the icon + web logo
+│   └── fetch_fonts.py     # re-downloads + bundles the UI fonts (offline)
 └── mediahotkey/
     ├── config.py          # load/save per-user config.json + defaults
     ├── discord_notify.py  # Discord webhook embeds
@@ -164,7 +167,9 @@ MediaHotKey/
         ├── index.html
         ├── styles.css
         ├── app.js
-        └── logo.png
+        ├── logo.png
+        ├── fonts.css      # @font-face rules → local woff2
+        └── fonts/         # bundled Zen Maru Gothic + JetBrains Mono
 ```
 
 ---
