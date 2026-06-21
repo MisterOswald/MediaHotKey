@@ -294,10 +294,41 @@ async function poll() {
 }
 
 let booted = false;
-function go() { if (booted) return; booted = true; boot(); }
-if (window.pywebview && window.pywebview.api) go();
-else {
-  window.addEventListener('pywebviewready', go);
-  // Browser preview (no pywebview): boot with demo data after the DOM settles.
-  window.addEventListener('DOMContentLoaded', () => setTimeout(go, 350));
+function go() {
+  if (booted) return;
+  booted = true;
+  Promise.resolve().then(boot).catch(showError);
 }
+
+// Surface any failure on-screen instead of leaving a blank window.
+function showError(err) {
+  const msg = (err && (err.stack || err.message)) || String(err);
+  let bar = document.getElementById('errbar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'errbar';
+    bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99;' +
+      'background:#C76A45;color:#fff;font:12px/1.4 monospace;padding:8px 12px;' +
+      'white-space:pre-wrap;max-height:40vh;overflow:auto';
+    document.body.appendChild(bar);
+  }
+  bar.textContent = 'UI error — please screenshot this:\n' + msg;
+}
+window.addEventListener('error', (e) => showError(e.error || e.message));
+
+// Wait for the pywebview bridge (it attaches window.pywebview.api slightly
+// after load); fall back to demo data after ~3s so the UI is never blank.
+function waitForBridge(cb) {
+  if (window.pywebview && window.pywebview.api) return cb();
+  let tries = 0;
+  const timer = setInterval(() => {
+    if ((window.pywebview && window.pywebview.api) || ++tries > 16) {
+      clearInterval(timer);
+      cb();
+    }
+  }, 200);
+  window.addEventListener('pywebviewready', () => { clearInterval(timer); cb(); });
+}
+
+window.addEventListener('DOMContentLoaded', () => waitForBridge(go));
+if (document.readyState !== 'loading') waitForBridge(go);

@@ -183,4 +183,9 @@ MediaHotKey/
 - **Hotkeys do nothing** — make sure you pressed **Start hotkeys**, and on
   Windows try running as Administrator (some games capture keys at a lower level).
 - **Media mode says "needs winsdk"** — `pip install winsdk` (Windows only).
-- **Blank window** — install/repair the Microsoft **WebView2 Runtime**.
+- **Window opens but is blank / "not responding" / has no tabs** — this is the
+  **Edge WebView2 Runtime** missing (common on Windows 10). MediaHotKey now
+  detects this and offers a download link on launch; install the free
+  [WebView2 Runtime](https://go.microsoft.com/fwlink/p/?LinkId=2124703) and
+  reopen. Also make sure you ran `pip install -r requirements.txt` (it installs
+  `pywebview` + `pythonnet`), not just `pip install pywebview`.

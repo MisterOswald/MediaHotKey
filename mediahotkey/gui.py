@@ -234,11 +234,80 @@ class Api:
             pass
 
 
+def _has_webview2():
+    """Best-effort check for the Edge WebView2 runtime (Windows only).
+
+    pywebview's renderer on Windows is WebView2, which is *not* always present
+    on Windows 10. If it's missing the window opens but never renders and looks
+    'not responding'. Returns True/False; on any uncertainty returns True so we
+    don't block a machine that actually has it."""
+    if not sys.platform.startswith("win"):
+        return True
+    try:
+        import winreg
+    except Exception:  # noqa: BLE001
+        return True
+    guid = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+    locations = [
+        (winreg.HKEY_LOCAL_MACHINE,
+         r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\\" + guid),
+        (winreg.HKEY_LOCAL_MACHINE,
+         r"SOFTWARE\Microsoft\EdgeUpdate\Clients\\" + guid),
+        (winreg.HKEY_CURRENT_USER,
+         r"SOFTWARE\Microsoft\EdgeUpdate\Clients\\" + guid),
+    ]
+    for root, path in locations:
+        try:
+            with winreg.OpenKey(root, path) as key:
+                pv, _ = winreg.QueryValueEx(key, "pv")
+                if pv and pv not in ("", "0.0.0.0"):
+                    return True
+        except OSError:
+            continue
+    return False
+
+
+def _message_box(text, title="MediaHotKey", style=0):
+    """Native dialog on Windows; console fallback elsewhere. Returns the
+    Win32 result code (1 = OK/Yes, 2 = Cancel)."""
+    if sys.platform.startswith("win"):
+        try:
+            import ctypes
+            return ctypes.windll.user32.MessageBoxW(0, text, title, style)
+        except Exception:  # noqa: BLE001
+            pass
+    print(f"{title}: {text}")
+    return 1
+
+
+WEBVIEW2_URL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"  # Evergreen bootstrapper
+
+
 def main():
     if webview is None:
-        print("pywebview is required. Install dependencies with:\n"
-              "    pip install -r requirements.txt")
+        _message_box(
+            "pywebview isn't installed.\n\nOpen a terminal in the MediaHotKey "
+            "folder and run:\n\n    pip install -r requirements.txt",
+            "MediaHotKey — missing dependency")
         sys.exit(1)
+
+    # If the WebView2 runtime is missing, a frameless window would just hang.
+    # Tell the user and offer to download it instead of trapping them.
+    if not _has_webview2():
+        MB_OKCANCEL = 0x1
+        MB_ICONWARNING = 0x30
+        res = _message_box(
+            "MediaHotKey needs the Microsoft Edge WebView2 Runtime to draw its "
+            "window (it's missing on some Windows 10 PCs).\n\n"
+            "Click OK to open the free download page, then install it and "
+            "reopen MediaHotKey.\n\n"
+            "Click Cancel to try launching anyway.",
+            "MediaHotKey — one-time setup", MB_OKCANCEL | MB_ICONWARNING)
+        if res == 1:  # OK → download
+            import webbrowser
+            webbrowser.open(WEBVIEW2_URL)
+            sys.exit(0)
+        # Cancel → fall through and attempt to start regardless.
 
     api = Api()
     index = os.path.join(_resource_dir(), "index.html")
@@ -263,15 +332,19 @@ def main():
                 api._log(f"[!] {exc}")
         threading.Timer(1.0, _autostart).start()
 
-    start_kwargs = {}
-    icon = _icon_path()
-    if icon:
-        start_kwargs["icon"] = icon
+    # Force the modern Chromium (WebView2) backend on Windows so the UI's
+    # modern JS runs; fall back gracefully on other platforms / old pywebview.
+    gui = "edgechromium" if sys.platform.startswith("win") else None
     try:
-        webview.start(**start_kwargs)
-    except TypeError:
-        # older pywebview without icon kwarg
-        webview.start()
+        webview.start(gui=gui) if gui else webview.start()
+    except Exception as exc:  # noqa: BLE001
+        _message_box(
+            "MediaHotKey couldn't open its window.\n\n"
+            f"Details: {exc}\n\n"
+            "Most often this means the Edge WebView2 Runtime is missing — "
+            "install it from:\n" + WEBVIEW2_URL,
+            "MediaHotKey — startup error")
+        raise
 
 
 if __name__ == "__main__":
