@@ -436,6 +436,47 @@ def _message_box(text, title="MediaHotKey", style=0):
 WEBVIEW2_URL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"  # Evergreen bootstrapper
 
 
+def _apply_window_icon(retries=12):
+    """Set the real app icon on the window + taskbar at runtime, so launching
+    via pythonw shows our icon instead of the generic Python one. (The frozen
+    .exe already carries the icon via PyInstaller --icon.)"""
+    if not sys.platform.startswith("win"):
+        return
+    ico = _icon_path()
+    if not ico:
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+        u = ctypes.windll.user32
+        u.FindWindowW.restype = wintypes.HWND
+        u.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+        u.LoadImageW.restype = wintypes.HANDLE
+        u.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT,
+                                 ctypes.c_int, ctypes.c_int, wintypes.UINT]
+        u.SendMessageW.restype = wintypes.LPARAM
+        u.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT,
+                                   wintypes.WPARAM, wintypes.LPARAM]
+        title = f"MediaHotKey {__version__}"
+        IMAGE_ICON, WM_SETICON = 1, 0x0080
+        ICON_SMALL, ICON_BIG = 0, 1
+        LR_LOADFROMFILE, LR_DEFAULTSIZE = 0x0010, 0x0040
+        for _ in range(retries):
+            hwnd = u.FindWindowW(None, title)
+            if hwnd:
+                big = u.LoadImageW(None, ico, IMAGE_ICON, 0, 0,
+                                   LR_LOADFROMFILE | LR_DEFAULTSIZE)
+                small = u.LoadImageW(None, ico, IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
+                if big:
+                    u.SendMessageW(hwnd, WM_SETICON, ICON_BIG, big)
+                if small:
+                    u.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small)
+                return
+            time.sleep(0.3)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def main():
     if webview is None:
         _message_box(
@@ -462,10 +503,22 @@ def main():
             sys.exit(0)
         # Cancel → fall through and attempt to start regardless.
 
+    # Give the app its own taskbar identity (so Windows uses our icon and
+    # groups it correctly rather than under "Python").
+    if sys.platform.startswith("win"):
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "MediaHotKey.App")
+        except Exception:  # noqa: BLE001
+            pass
+
     api = Api()
     index = os.path.join(_resource_dir(), "index.html")
-    window = webview.create_window(
-        f"MediaHotKey {__version__}",
+    settings = api.config["settings"]
+    start_hidden = bool(_TRAY and settings.get("start_minimized"))
+
+    win_kwargs = dict(
         url=index,
         js_api=api,
         width=1120,
@@ -475,6 +528,12 @@ def main():
         frameless=False,         # native frame → resize from edges + min/max/close
         background_color="#F6EFE1",
     )
+    try:
+        window = webview.create_window(
+            f"MediaHotKey {__version__}", hidden=start_hidden, **win_kwargs)
+    except TypeError:
+        # older pywebview without the hidden= kwarg
+        window = webview.create_window(f"MediaHotKey {__version__}", **win_kwargs)
     api.window = window
 
     # Closing the X hides to the tray (hotkeys keep running) instead of quitting.
@@ -483,23 +542,29 @@ def main():
     except Exception:  # noqa: BLE001
         pass
 
-    settings = api.config["settings"]
-    if settings.get("start_engine_on_launch"):
-        def _autostart():
+    def _on_started():
+        # Runs on a worker thread once the GUI loop is up — the safe point to
+        # touch the window, start the tray, and kick off the engine (avoids the
+        # startup race that could wedge the tray icon).
+        if start_hidden:
+            try:
+                api.window.hide()   # belt-and-suspenders if hidden= was ignored
+            except Exception:  # noqa: BLE001
+                pass
+            api._ensure_tray()
+            api._log("[i] started minimized to the system tray.")
+        _apply_window_icon()
+        if settings.get("start_engine_on_launch"):
             try:
                 api.engine.start()
             except Exception as exc:  # noqa: BLE001
                 api._log(f"[!] {exc}")
-        threading.Timer(1.0, _autostart).start()
-
-    if _TRAY and settings.get("start_minimized"):
-        threading.Timer(0.8, api._hide_to_tray).start()
 
     # Force the modern Chromium (WebView2) backend on Windows so the UI's
     # modern JS runs; fall back gracefully on other platforms / old pywebview.
     gui = "edgechromium" if sys.platform.startswith("win") else None
     try:
-        webview.start(gui=gui) if gui else webview.start()
+        webview.start(_on_started, gui=gui) if gui else webview.start(_on_started)
     except Exception as exc:  # noqa: BLE001
         _message_box(
             "MediaHotKey couldn't open its window.\n\n"
