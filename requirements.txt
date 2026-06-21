@@ -1,8 +1,12 @@
 # Core
-customtkinter>=5.2.0      # modern dark-themed UI
-spotipy>=2.23.0           # Spotify Web API client
+pywebview>=4.4              # native window hosting the HTML/CSS/JS UI
+spotipy>=2.23.0            # Spotify Web API client
 keyboard>=0.13.5          # global hotkeys
 requests>=2.28.0          # Discord webhooks + HTTP
+
+# Windows: pywebview uses the Edge WebView2 runtime (preinstalled on Win10/11)
+# and needs the pythonnet/clr bridge.
+pythonnet>=3.0.0; sys_platform == "win32"
 
 # Windows-only "Media mode" (universal SMTC transport control).
 # Safe to skip on macOS/Linux — the app detects it and disables media mode.

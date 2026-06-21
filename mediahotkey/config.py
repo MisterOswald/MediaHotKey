@@ -46,6 +46,9 @@ DEFAULT_CONFIG = {
         "start_engine_on_launch": False,  # auto-start hotkeys when UI opens
         "start_minimized": False,         # launch hidden to the system tray
     },
+    "mascot": {
+        "image": "",                      # user-chosen now-playing panel art (data URL)
+    },
 }
 
 # Human-readable labels + the action each hotkey maps to. Used by the UI.

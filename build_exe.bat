@@ -15,7 +15,10 @@ pyinstaller ^
   --onefile ^
   --windowed ^
   --name MediaHotKey ^
-  --collect-all customtkinter ^
+  --icon assets\icon.ico ^
+  --add-data "mediahotkey\web;mediahotkey\web" ^
+  --add-data "assets\icon.ico;assets" ^
+  --collect-all webview ^
   --collect-all winsdk ^
   run.py
 

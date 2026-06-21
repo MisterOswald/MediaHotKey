@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MediaHotKey</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- titlebar (custom chrome / frameless) -->
+  <div class="titlebar pywebview-drag-region">
+    <div class="left">
+      <div class="glyph"></div>
+      <span class="name">MediaHotKey 1.0.0</span>
+    </div>
+    <div class="ctrls">
+      <span id="btn-min" title="Minimize">—</span>
+      <span style="font-size:11px" id="btn-max" title="Maximize">▢</span>
+      <span class="close" id="btn-close" title="Close">✕</span>
+    </div>
+  </div>
+
+  <!-- header -->
+  <div class="header">
+    <div class="brand">
+      <div class="logo"><img src="logo.png" alt=""></div>
+      <div>
+        <div class="title">MediaHotKey</div>
+        <div class="tag">stay cozy · keep playing</div>
+      </div>
+    </div>
+    <div class="right">
+      <div class="mode">Mode · <b id="mode-val">SPOTIFY</b></div>
+      <div class="pill stopped" id="run-pill">
+        <span class="dot"></span><span class="txt" id="run-txt">Stopped</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- tabs -->
+  <div class="tabbar">
+    <div class="tabs" id="tabs"></div>
+  </div>
+
+  <!-- body -->
+  <div class="body">
+    <div class="content">
+
+      <!-- Spotify -->
+      <div class="panel" data-tab="Spotify">
+        <div class="h-sec">Spotify Web API credentials</div>
+        <div class="desc">Create an app at developer.spotify.com → Dashboard. Copy the Client ID
+          and Client Secret. In the app's settings add the Redirect URI below exactly. Playback
+          control (skip/pause) needs Spotify Premium.</div>
+        <div class="row"><div class="lbl">Client ID</div>
+          <input class="field" id="f-client-id" placeholder="from the Spotify dashboard"></div>
+        <div class="row"><div class="lbl">Client Secret</div>
+          <input class="field" id="f-client-secret" type="password" placeholder="kept on this machine only"></div>
+        <div class="row"><div class="lbl">Redirect URI</div>
+          <input class="field" id="f-redirect" placeholder="http://127.0.0.1:8888/callback"></div>
+        <div class="btnrow">
+          <button class="btn secondary" id="btn-dashboard">Open Spotify Dashboard ↗</button>
+          <button class="btn primary" id="btn-test-spotify">Test / Authorize</button>
+        </div>
+        <div class="status" id="spotify-status"></div>
+      </div>
+
+      <!-- Discord -->
+      <div class="panel" data-tab="Discord">
+        <div class="h-sec">Discord webhook <span class="opt">(optional)</span></div>
+        <div class="desc">Paste a Discord channel webhook URL to post warm now-playing cards, likes
+          and mode switches. Leave blank to disable Discord entirely. Create one in a server:
+          Channel → Edit → Integrations → Webhooks.</div>
+        <div class="row"><div class="lbl">Webhook URL</div>
+          <input class="field" id="f-webhook" placeholder="https://discord.com/api/webhooks/…  (optional)"></div>
+        <div class="btnrow">
+          <button class="btn sage" id="btn-test-discord">Send test message</button>
+        </div>
+        <div class="status" id="discord-status"></div>
+      </div>
+
+      <!-- Hotkeys -->
+      <div class="panel" data-tab="Hotkeys">
+        <div class="h-sec">Global hotkeys</div>
+        <div class="desc">Click Record and press the combination you want (e.g. F9, or
+          Ctrl+Shift+F9), or type it manually like 'ctrl+alt+f9'. These work system-wide while the
+          engine is running.</div>
+        <div id="hotkeys"></div>
+      </div>
+
+      <!-- General -->
+      <div class="panel" data-tab="General">
+        <div class="h-sec" style="margin-bottom:20px">Mode &amp; playback</div>
+        <div class="gen-row"><div class="lbl">Start in mode</div>
+          <div class="seg" id="seg-mode">
+            <div class="opt" data-val="spotify">spotify</div>
+            <div class="opt" data-val="media">media</div>
+          </div>
+        </div>
+        <div class="gen-row" style="margin-bottom:9px"><div class="lbl">Media app hint</div>
+          <input class="field sm" id="f-hint" placeholder="brave / chrome / msedge"></div>
+        <div class="helper">In Media mode, prefer the browser/app whose id contains this word.
+          Leave blank to control whatever is current.</div>
+        <div class="gen-row" style="margin-bottom:28px"><div class="lbl">Poll interval (s)</div>
+          <input class="field xs" id="f-poll"></div>
+        <div class="h-sec" style="margin-bottom:16px">Options</div>
+        <div class="opts" id="opts"></div>
+        <div class="cfgpath" id="cfgpath"></div>
+      </div>
+
+      <!-- Log -->
+      <div class="panel" data-tab="Log">
+        <div class="log-head">
+          <div class="h-sec" style="margin:0">Activity log</div>
+          <button class="btn clear" id="btn-clear">Clear log</button>
+        </div>
+        <div class="console" id="console"></div>
+      </div>
+
+    </div>
+
+    <!-- mascot / now-playing -->
+    <div class="mascot">
+      <div class="np">♪ NOW PLAYING</div>
+      <div class="art" id="art" title="Click to set mascot art">
+        <div class="hint">Click to set<br>mascot art</div>
+      </div>
+      <div class="meta">
+        <div class="t" id="np-title">—</div>
+        <div class="a" id="np-artist">not playing</div>
+      </div>
+      <div>
+        <div class="bar"><div class="fill" id="np-fill"></div></div>
+        <div class="times"><span id="np-cur">0:00</span><span id="np-dur">0:00</span></div>
+      </div>
+      <div class="transport">
+        <div class="tbtn" id="tp-prev">⏮</div>
+        <div class="tbtn play" id="tp-play">❚❚</div>
+        <div class="tbtn" id="tp-next">⏭</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- footer -->
+  <div class="footer">
+    <div class="left">
+      <button class="btn foot stop" id="btn-engine">▶ Start hotkeys</button>
+      <button class="btn foot save" id="btn-save">⊞ Save settings</button>
+    </div>
+    <div class="caps" id="caps"></div>
+  </div>
+
+</div>
+<div class="toast" id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>

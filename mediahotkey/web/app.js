@@ -1,0 +1,303 @@
+/* MediaHotKey UI logic — talks to the Python engine via window.pywebview.api. */
+
+const TABS = ['Spotify', 'Discord', 'Hotkeys', 'General', 'Log'];
+const HOTKEYS = [
+  ['next', 'Next track'],
+  ['prev', 'Previous track'],
+  ['playpause', 'Play / Pause'],
+  ['add', 'Add to playlist (Spotify)'],
+  ['like', 'Like to library (Spotify)'],
+  ['toggle_mode', 'Toggle Spotify / Media mode'],
+];
+const OPTS = [
+  ['track_activity', 'Track now-playing across devices (Spotify mode)'],
+  ['announce_pause_resume', 'Also post when you pause / resume the same track'],
+  ['start_engine_on_launch', 'Start hotkeys automatically when the app opens'],
+  ['start_minimized', 'Launch minimized to the system tray'],
+];
+
+let cfg = null;          // working copy of the config
+let activeTab = 'Spotify';
+let running = false;
+let mascotImage = '';    // user-chosen art (data URL)
+let lastArt = '';        // currently shown art url
+
+const $ = (sel) => document.querySelector(sel);
+
+// When opened inside the app, window.pywebview.api is the real Python bridge.
+// When opened directly in a browser (preview), fall back to demo data so the
+// design renders fully without a backend.
+const DEMO = {
+  config: {
+    spotify: { client_id: '95352be1ea884c468c68e0c2c0103099', client_secret: 'demo-secret-value',
+      redirect_uri: 'http://127.0.0.1:8888/callback' },
+    discord: { webhook_url: 'https://discord.com/api/webhooks/1515438913236373595/yhOkDxkoUMfe1Zb…' },
+    hotkeys: { next: 'f9', prev: 'shift+f9', playpause: 'ctrl+f9', add: 'alt+f9',
+      like: 'ctrl+alt+f9', toggle_mode: 'ctrl+shift+f9' },
+    settings: { start_mode: 'spotify', media_app_hint: 'brave', poll_interval: 5,
+      track_activity: true, announce_pause_resume: true, start_engine_on_launch: true,
+      start_minimized: true },
+    mascot: {},
+  },
+  caps: { keyboard: true, spotipy: true, media: true },
+  running: true, mode: 'spotify',
+  config_path: 'C:\\Users\\you\\AppData\\Roaming\\MediaHotKey\\config.json',
+  now_playing: { title: 'TANK', artist: 'NMIXX', art_url: null,
+    progress_ms: 102000, duration_ms: 185000, is_playing: true, source: 'spotify' },
+  logs: [
+    '[ok] ♪  Now Playing: Kep1er — WA DA DA (Japanese ver.)',
+    '[ok] ⇄  Switched to SPOTIFY mode',
+    '[ok] ♪  Now Playing: NMIXX — TANK',
+    '[ok] ＋  Added to playlist: NMIXX — TANK',
+    '[ok] ♥  Liked to library: NMIXX — TANK',
+    '[i] minimized to tray — hotkeys still active.',
+    '[ok] Hotkeys active. Engine running.',
+  ],
+};
+const MOCK = {
+  get_state: async () => DEMO,
+  poll: async () => ({ running: DEMO.running, mode: DEMO.mode, caps: DEMO.caps,
+    now_playing: DEMO.now_playing, logs: DEMO.logs }),
+  save_config: async () => ({ ok: true }),
+  toggle_engine: async () => { DEMO.running = !DEMO.running; return { ok: true }; },
+  transport: async () => ({ ok: true }),
+  test_spotify: async () => ({ ok: true, msg: 'Connected to Spotify (nothing playing right now)' }),
+  test_discord: async () => ({ ok: true, msg: 'Test message sent. Check your channel.' }),
+  record_hotkey: async () => '', open_url: () => {}, choose_mascot: async () => '',
+  clear_log: async () => { DEMO.logs = []; return { ok: true }; },
+  minimize: () => {}, toggle_maximize: () => {}, close: () => {},
+};
+const api = () => (window.pywebview && window.pywebview.api) || MOCK;
+
+// ---------- rendering ----------
+function renderTabs() {
+  const host = $('#tabs');
+  host.innerHTML = '';
+  TABS.forEach((name) => {
+    const el = document.createElement('div');
+    el.className = 'tab' + (name === activeTab ? ' active' : '');
+    el.textContent = name;
+    el.onclick = () => { activeTab = name; renderTabs(); renderPanels(); };
+    host.appendChild(el);
+  });
+}
+
+function renderPanels() {
+  document.querySelectorAll('.panel').forEach((p) => {
+    p.classList.toggle('active', p.dataset.tab === activeTab);
+  });
+}
+
+function renderHotkeys() {
+  const host = $('#hotkeys');
+  host.innerHTML = '';
+  HOTKEYS.forEach(([key, label]) => {
+    const row = document.createElement('div');
+    row.className = 'hkrow';
+    const lbl = document.createElement('div');
+    lbl.className = 'lbl'; lbl.textContent = label;
+    const inp = document.createElement('input');
+    inp.className = 'field'; inp.value = cfg.hotkeys[key] || '';
+    inp.oninput = () => { cfg.hotkeys[key] = inp.value.trim(); };
+    const rec = document.createElement('button');
+    rec.className = 'btn record'; rec.textContent = 'Record';
+    rec.onclick = async () => {
+      rec.classList.add('recording'); rec.textContent = 'press keys…';
+      try {
+        const combo = await api().record_hotkey();
+        if (combo) { inp.value = combo; cfg.hotkeys[key] = combo; }
+      } catch (e) { /* ignore */ }
+      rec.classList.remove('recording'); rec.textContent = 'Record';
+    };
+    row.append(lbl, inp, rec);
+    host.appendChild(row);
+  });
+}
+
+function renderOpts() {
+  const host = $('#opts');
+  host.innerHTML = '';
+  OPTS.forEach(([key, label]) => {
+    const row = document.createElement('div');
+    row.className = 'opt-row';
+    const tg = document.createElement('div');
+    tg.className = 'toggle' + (cfg.settings[key] ? ' on' : '');
+    tg.innerHTML = '<div class="knob"></div>';
+    const span = document.createElement('span');
+    span.textContent = label;
+    row.onclick = () => {
+      cfg.settings[key] = !cfg.settings[key];
+      tg.classList.toggle('on', cfg.settings[key]);
+    };
+    row.append(tg, span);
+    host.appendChild(row);
+  });
+}
+
+function renderSeg() {
+  document.querySelectorAll('#seg-mode .opt').forEach((o) => {
+    o.classList.toggle('active', o.dataset.val === cfg.settings.start_mode);
+    o.onclick = () => {
+      cfg.settings.start_mode = o.dataset.val;
+      renderSeg();
+    };
+  });
+}
+
+function fillFields() {
+  $('#f-client-id').value = cfg.spotify.client_id || '';
+  $('#f-client-secret').value = cfg.spotify.client_secret || '';
+  $('#f-redirect').value = cfg.spotify.redirect_uri || '';
+  $('#f-webhook').value = cfg.discord.webhook_url || '';
+  $('#f-hint').value = cfg.settings.media_app_hint || '';
+  $('#f-poll').value = cfg.settings.poll_interval ?? 5;
+}
+
+function bindFields() {
+  $('#f-client-id').oninput = (e) => cfg.spotify.client_id = e.target.value.trim();
+  $('#f-client-secret').oninput = (e) => cfg.spotify.client_secret = e.target.value.trim();
+  $('#f-redirect').oninput = (e) => cfg.spotify.redirect_uri = e.target.value.trim();
+  $('#f-webhook').oninput = (e) => cfg.discord.webhook_url = e.target.value.trim();
+  $('#f-hint').oninput = (e) => cfg.settings.media_app_hint = e.target.value.trim();
+  $('#f-poll').oninput = (e) => cfg.settings.poll_interval = e.target.value;
+}
+
+// ---------- now-playing ----------
+function fmt(ms) {
+  const s = Math.max(0, Math.floor((ms || 0) / 1000));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+
+function setArt(url) {
+  const art = $('#art');
+  const show = url || mascotImage || '';
+  if (show !== lastArt) {
+    lastArt = show;
+    art.style.backgroundImage = show ? `url("${show}")` : '';
+    art.classList.toggle('filled', !!show);
+  }
+}
+
+function renderNowPlaying(np) {
+  if (!np) np = {};
+  $('#np-title').textContent = np.title || '—';
+  $('#np-artist').textContent = np.artist || 'not playing';
+  const dur = np.duration_ms || 0, cur = np.progress_ms || 0;
+  $('#np-cur').textContent = fmt(cur);
+  $('#np-dur').textContent = fmt(dur);
+  $('#np-fill').style.width = dur ? Math.min(100, cur / dur * 100) + '%' : '0';
+  $('#tp-play').textContent = np.is_playing ? '❚❚' : '▶';
+  setArt(np.art_url);
+}
+
+// ---------- status / caps ----------
+function renderCaps(caps) {
+  const cell = (label, ok) =>
+    `<span>${label} <span class="${ok ? 'ok' : 'no'}">${ok ? '✓' : '✗'}</span></span>`;
+  $('#caps').innerHTML =
+    cell('keyboard', caps.keyboard) + cell('spotify', caps.spotipy) +
+    cell('media/SMTC', caps.media);
+}
+
+function renderRunning(isRunning, mode) {
+  running = isRunning;
+  const pill = $('#run-pill');
+  pill.className = 'pill ' + (isRunning ? 'running' : 'stopped');
+  $('#run-txt').textContent = isRunning ? 'Running' : 'Stopped';
+  $('#mode-val').textContent = (mode || cfg.settings.start_mode || 'spotify').toUpperCase();
+  const btn = $('#btn-engine');
+  if (isRunning) { btn.className = 'btn foot stop'; btn.textContent = '■ Stop hotkeys'; }
+  else { btn.className = 'btn foot'; btn.style.background =
+    'linear-gradient(135deg,#87A06F,#6E8C56)'; btn.style.color = '#fff';
+    btn.textContent = '▶ Start hotkeys'; }
+}
+
+function renderLog(lines) {
+  const c = $('#console');
+  const atBottom = c.scrollTop + c.clientHeight >= c.scrollHeight - 20;
+  c.innerHTML = (lines || []).map((l) => {
+    let pre = '', body = l;
+    const m = /^(\[[a-z!]+\]|\S+)\s+(.*)$/.exec(l);
+    if (l.startsWith('[')) { const i = l.indexOf(']'); pre = l.slice(0, i + 1); body = l.slice(i + 1).trim(); }
+    return `<div class="logline"><span class="pre">${esc(pre)}</span><span class="bd">${esc(body)}</span></div>`;
+  }).join('');
+  if (atBottom) c.scrollTop = c.scrollHeight;
+}
+
+function esc(s) { return (s || '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+
+// ---------- toast ----------
+let toastT = null;
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 1600);
+}
+
+// ---------- actions ----------
+function wire() {
+  $('#btn-save').onclick = async () => { await api().save_config(cfg); toast('Settings saved ✓'); };
+  $('#btn-engine').onclick = async () => {
+    const res = await api().toggle_engine(cfg);
+    if (res && res.error) toast(res.error);
+  };
+  $('#btn-dashboard').onclick = () => api().open_url('https://developer.spotify.com/dashboard');
+  $('#btn-test-spotify').onclick = async () => {
+    const s = $('#spotify-status'); s.className = 'status'; s.textContent = 'Authorizing… a browser tab may open.';
+    const r = await api().test_spotify(cfg);
+    s.className = 'status' + (r.ok ? '' : ' err');
+    s.innerHTML = r.ok ? `✓ ${esc(r.msg)}` : `✗ ${esc(r.msg)}`;
+  };
+  $('#btn-test-discord').onclick = async () => {
+    const s = $('#discord-status'); const r = await api().test_discord(cfg);
+    s.className = 'status' + (r.ok ? '' : ' err');
+    s.textContent = (r.ok ? '✓ ' : '✗ ') + r.msg;
+  };
+  $('#btn-clear').onclick = async () => { await api().clear_log(); renderLog([]); };
+  $('#art').onclick = async () => {
+    const data = await api().choose_mascot();
+    if (data) { mascotImage = data; cfg.mascot = { image: data }; setArt(null); }
+  };
+  $('#tp-prev').onclick = () => api().transport('prev', cfg);
+  $('#tp-next').onclick = () => api().transport('next', cfg);
+  $('#tp-play').onclick = () => api().transport('playpause', cfg);
+  $('#btn-min').onclick = () => api().minimize();
+  $('#btn-max').onclick = () => api().toggle_maximize();
+  $('#btn-close').onclick = () => api().close();
+}
+
+// ---------- boot ----------
+async function boot() {
+  const state = await api().get_state();
+  cfg = state.config;
+  if (!cfg.mascot) cfg.mascot = {};
+  mascotImage = cfg.mascot.image || '';
+  $('#cfgpath').textContent = 'Config file: ' + state.config_path;
+
+  renderTabs(); renderPanels(); renderHotkeys(); renderOpts(); renderSeg();
+  fillFields(); bindFields(); wire();
+  renderCaps(state.caps);
+  renderRunning(state.running, state.mode);
+  setArt(null);
+
+  setInterval(poll, 1000);
+  poll();
+}
+
+async function poll() {
+  try {
+    const p = await api().poll();
+    renderRunning(p.running, p.mode);
+    renderCaps(p.caps);
+    renderNowPlaying(p.now_playing);
+    renderLog(p.logs);
+  } catch (e) { /* window closing */ }
+}
+
+let booted = false;
+function go() { if (booted) return; booted = true; boot(); }
+if (window.pywebview && window.pywebview.api) go();
+else {
+  window.addEventListener('pywebviewready', go);
+  // Browser preview (no pywebview): boot with demo data after the DOM settles.
+  window.addEventListener('DOMContentLoaded', () => setTimeout(go, 350));
+}

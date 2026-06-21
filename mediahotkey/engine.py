@@ -107,6 +107,13 @@ class Engine:
         self._seen = {"track_id": None, "is_playing": None}
         self._last_add = {"track": None, "playlist": None}
 
+        # Last-known track, surfaced to the UI's now-playing panel.
+        self.now_playing = {
+            "title": None, "artist": None, "art_url": None,
+            "progress_ms": 0, "duration_ms": 0, "is_playing": False,
+            "source": None,
+        }
+
     # ------------------------------------------------------------------ log
     def log(self, msg):
         try:
@@ -211,6 +218,19 @@ class Engine:
         is_playing = playback.get("is_playing", False)
         footer = self._footer_for(playback)
         announce_pr = self.config["settings"].get("announce_pause_resume", False)
+
+        # Keep the now-playing panel fresh on every poll (progress included).
+        album = track.get("album", {})
+        images = album.get("images", [])
+        self.now_playing = {
+            "title": track.get("name"),
+            "artist": ", ".join(a["name"] for a in track.get("artists", [])),
+            "art_url": images[0]["url"] if images else None,
+            "progress_ms": playback.get("progress_ms") or 0,
+            "duration_ms": track.get("duration_ms") or 0,
+            "is_playing": is_playing,
+            "source": "spotify",
+        }
 
         with self._seen_lock:
             track_changed = tid != self._seen["track_id"]
@@ -411,6 +431,15 @@ class Engine:
                                  "in your browser?)", "error")
                 return
             title, artist, art = result
+            art_url = None
+            if art:
+                import base64
+                art_url = "data:image/jpeg;base64," + base64.b64encode(art).decode()
+            self.now_playing = {
+                "title": title, "artist": artist, "art_url": art_url,
+                "progress_ms": 0, "duration_ms": 0,
+                "is_playing": True, "source": "media",
+            }
             self.notify_media("🎵 Now Playing", title, artist,
                               footer="Media mode (browser / SoundCloud)", art_bytes=art)
         self._run_async(lambda: self._safe(go, label))
