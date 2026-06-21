@@ -78,6 +78,7 @@ class Api:
         self._np_stop = threading.Event()
         self._np_last_spotify = None
         self._np_last_spotify_t = 0.0
+        self._np_misses = 0
         self._np_thread = threading.Thread(target=self._np_loop, daemon=True)
         self._np_thread.start()
 
@@ -109,12 +110,21 @@ class Api:
             if np:
                 np["fetched_at"] = int(now * 1000)
                 self.engine.now_playing = np
+                self._np_misses = 0
             else:
-                self.engine.now_playing = {
-                    "title": None, "artist": None, "art_url": None,
-                    "progress_ms": 0, "duration_ms": 0, "is_playing": False,
-                    "source": None, "fetched_at": int(now * 1000),
-                }
+                # Don't blank on a single transient miss — hold the last track
+                # (paused) and only clear after several seconds of nothing.
+                self._np_misses += 1
+                if self._np_misses >= 8:
+                    self.engine.now_playing = {
+                        "title": None, "artist": None, "art_url": None,
+                        "progress_ms": 0, "duration_ms": 0, "is_playing": False,
+                        "source": None, "fetched_at": int(now * 1000),
+                    }
+                elif self.engine.now_playing.get("title"):
+                    last = dict(self.engine.now_playing)
+                    last["is_playing"] = False
+                    self.engine.now_playing = last
             self._np_stop.wait(1.0)
 
     # -- config -----------------------------------------------------------

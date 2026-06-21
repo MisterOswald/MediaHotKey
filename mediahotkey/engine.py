@@ -424,6 +424,47 @@ class Engine:
         return (title, artist, art)
 
     # ---- live now-playing readers (for the UI panel) -------------------
+    def _pick_now_playing_session(self, mgr):
+        """Choose which media session to *display*. Unlike transport control
+        (which honours media_app_hint), the panel should show whatever is
+        actually playing — and in Spotify mode it should only ever show the
+        Spotify session, so a paused/background browser tab can't hijack the
+        card. Returns None in Spotify mode when Spotify isn't a local session,
+        letting the caller fall back to the Spotify Web API."""
+        try:
+            sessions = mgr.get_sessions()
+            items = []
+            for i in range(sessions.size):
+                s = sessions.get_at(i)
+                aumid = (s.source_app_user_model_id or "").lower()
+                try:
+                    status = int(s.get_playback_info().playback_status)
+                except Exception:  # noqa: BLE001
+                    status = 0
+                items.append((aumid, s, status))
+        except Exception:  # noqa: BLE001
+            return mgr.get_current_session()
+
+        if self.mode == "spotify":
+            spotify = [it for it in items if "spotify" in it[0]]
+            playing = [it for it in spotify if it[2] == 4]
+            if playing:
+                return playing[0][1]
+            if spotify:
+                return spotify[0][1]
+            return None  # no local Spotify session → use the Web API instead
+
+        # media mode: prefer the hinted app, then any playing session.
+        hint = (self.config["settings"].get("media_app_hint", "") or "").lower()
+        if hint:
+            for aumid, s, status in items:
+                if hint in aumid:
+                    return s
+        for aumid, s, status in items:
+            if status == 4:
+                return s
+        return mgr.get_current_session()
+
     async def _smtc_snapshot(self):
         """Read the current Windows media session: title/artist/art/position.
 
@@ -435,7 +476,7 @@ class Engine:
             mgr = await MediaManager.request_async()
         except Exception:  # noqa: BLE001
             return None
-        session = self._pick_session(mgr)
+        session = self._pick_now_playing_session(mgr)
         if session is None:
             return None
         try:
