@@ -62,6 +62,11 @@ pip install -r requirements.txt
 python run.py
 ```
 
+> **Don't want the black cmd window?** `python run.py` always shows a console
+> because `python.exe` is a console program. Double-click **`MediaHotKey.pyw`**
+> instead (or run `pythonw MediaHotKey.pyw`) — `.pyw` uses the windowless
+> Python and opens *only* the app. The built `.exe` is windowless too.
+
 Then in the window:
 
 1. **Spotify tab** — paste your Client ID / Secret (and add the Redirect URI to
@@ -137,6 +142,7 @@ Your Client Secret and tokens never leave your machine.
 
 ```
 MediaHotKey/
+├── MediaHotKey.pyw        # double-click to launch with NO console window
 ├── run.py                 # launcher (UI, or --headless)
 ├── build_exe.bat          # one-click PyInstaller build → dist/MediaHotKey.exe
 ├── requirements.txt
