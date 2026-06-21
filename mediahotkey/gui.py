@@ -80,6 +80,11 @@ class Api:
         self._np_last_spotify_t = 0.0
         self._np_misses = 0
         self._np_art_by_track = {}   # {"title|artist": art_url} — stable cover
+        self._np_last_sig = None
+        caps = Engine.capabilities()
+        self._log(f"[dbg:init] keyboard={caps['keyboard']} spotipy={caps['spotipy']} "
+                  f"media/SMTC={caps['media']} token_cache="
+                  f"{os.path.exists(token_cache_path())}")
         self._np_thread = threading.Thread(target=self._np_loop, daemon=True)
         self._np_thread.start()
 
@@ -126,8 +131,10 @@ class Api:
             if np:
                 # Lock the cover art to the first one we get for this track so
                 # it can't flip (SMTC data-URL vs Spotify https URL) or blink
-                # out when one source momentarily lacks art.
-                key = (np.get("title") or "") + "|" + (np.get("artist") or "")
+                # out when one source momentarily lacks art. Keyed on the title
+                # alone (normalized) so artist-string differences between the
+                # two sources don't break the lock.
+                key = (np.get("title") or "").strip().lower()
                 if np.get("art_url"):
                     if key not in self._np_art_by_track:
                         self._np_art_by_track = {key: np["art_url"]}
@@ -140,11 +147,24 @@ class Api:
                 np.setdefault("fetched_at", int(now * 1000))
                 self.engine.now_playing = np
                 self._np_misses = 0
+
+                # Log the final decision whenever it meaningfully changes.
+                art = np.get("art_url") or ""
+                kind = "none" if not art else ("data" if art.startswith("data:") else "url")
+                sig = f"{np.get('source')}|{np.get('title')}|{kind}|{np.get('is_playing')}"
+                if sig != self._np_last_sig:
+                    self._np_last_sig = sig
+                    self._log(f"[dbg:np] source={np.get('source')} "
+                              f"title={np.get('title')!r} art={kind} "
+                              f"playing={np.get('is_playing')}")
             else:
                 # Don't blank on a single transient miss — hold the last track
                 # (paused) and only clear after several seconds of nothing.
                 self._np_misses += 1
                 if self._np_misses >= 8:
+                    if self._np_last_sig != "cleared":
+                        self._np_last_sig = "cleared"
+                        self._log("[dbg:np] cleared — no source playing")
                     self.engine.now_playing = {
                         "title": None, "artist": None, "art_url": None,
                         "progress_ms": 0, "duration_ms": 0, "is_playing": False,

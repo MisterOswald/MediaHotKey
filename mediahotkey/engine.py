@@ -116,6 +116,16 @@ class Engine:
         }
         # Cache the decoded SMTC cover so we don't re-encode it every poll.
         self._np_art_cache = {}
+        # De-duplicated diagnostic logging (logs only when a message changes).
+        self._dbg_last = {}
+
+    def _dbg(self, tag, msg):
+        """Local-only debug log (never sent to Discord). De-duplicated per tag
+        so a once-per-second poll doesn't flood the Log tab."""
+        if self._dbg_last.get(tag) == msg:
+            return
+        self._dbg_last[tag] = msg
+        self.log(f"[dbg:{tag}] {msg}")
 
     # ------------------------------------------------------------------ log
     def log(self, msg):
@@ -478,10 +488,17 @@ class Engine:
             return None
         session = self._pick_now_playing_session(mgr)
         if session is None:
+            self._dbg("smtc", "no session (or no Spotify session in Spotify mode)")
             return None
+        aumid = ""
+        try:
+            aumid = session.source_app_user_model_id or ""
+        except Exception:  # noqa: BLE001
+            pass
         try:
             props = await session.try_get_media_properties_async()
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            self._dbg("smtc", f"media properties failed for {aumid}: {exc}")
             return None
         title = (props.title or "").strip()
         artist = (props.artist or "").strip()
@@ -504,19 +521,24 @@ class Engine:
         except Exception:  # noqa: BLE001
             pass
 
+        # Only cache a *successful* cover so a transient thumbnail failure can
+        # heal on the next read instead of sticking as "no art" forever.
         key = f"{title}|{artist}"
-        if key in self._np_art_cache:
-            art_url = self._np_art_cache[key]
-        else:
-            art_url = None
+        art_url = self._np_art_cache.get(key)
+        if not art_url:
             try:
                 art = await self._read_thumbnail(props)
                 if art:
                     art_url = "data:image/jpeg;base64," + base64.b64encode(art).decode()
-            except Exception:  # noqa: BLE001
+                    self._np_art_cache = {key: art_url}
+                else:
+                    self._dbg("smtc", f"thumbnail empty for {title!r} ({aumid})")
+            except Exception as exc:  # noqa: BLE001
+                self._dbg("smtc", f"thumbnail read error for {title!r}: {exc}")
                 art_url = None
-            self._np_art_cache = {key: art_url}  # keep only the latest track
 
+        self._dbg("smtc", f"app={aumid} title={title!r} playing={is_playing} "
+                          f"dur={duration_ms} art={'yes' if art_url else 'no'}")
         return {
             "title": title or "Unknown", "artist": artist, "art_url": art_url,
             "progress_ms": progress_ms, "duration_ms": duration_ms,
@@ -527,20 +549,26 @@ class Engine:
     def read_media_now_playing(self):
         try:
             return asyncio.run(self._smtc_snapshot())
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            self._dbg("smtc", f"snapshot crashed: {exc}")
             return None
 
     def read_spotify_now_playing(self):
         """Now-playing via the Spotify Web API (covers remote devices)."""
         try:
             pb = self._current()
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            self._dbg("spotify", f"web api error: {exc}")
             return None
         if not pb or not pb.get("item"):
+            self._dbg("spotify", "web api: nothing playing")
             return None
         track = pb["item"]
         album = track.get("album", {})
         images = album.get("images", [])
+        self._dbg("spotify", f"title={track.get('name')!r} "
+                             f"art={'yes' if images else 'no'} "
+                             f"playing={pb.get('is_playing')}")
         return {
             "title": track.get("name"),
             "artist": ", ".join(a["name"] for a in track.get("artists", [])),
