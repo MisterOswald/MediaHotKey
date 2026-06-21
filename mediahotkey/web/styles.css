@@ -43,21 +43,6 @@ body {
 
 .app { display: flex; flex-direction: column; height: 100vh; background: var(--paper); }
 
-/* ---- titlebar ---- */
-.titlebar {
-  height: 40px; background: var(--titlebar); flex: none;
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 0 16px; border-bottom: 1px solid var(--panel-border);
-}
-.titlebar .left { display: flex; align-items: center; gap: 10px; }
-.titlebar .glyph { width: 16px; height: 16px; border-radius: 4px;
-  background: linear-gradient(135deg, var(--terra-top), var(--terra)); }
-.titlebar .name { font: 500 13px var(--ui); color: var(--muted); }
-.titlebar .ctrls { display: flex; align-items: center; gap: 16px;
-  color: #bcab90; font-size: 13px; }
-.titlebar .ctrls span { cursor: pointer; }
-.titlebar .ctrls .close { color: var(--red); }
-
 /* ---- header ---- */
 .header { display: flex; align-items: center; justify-content: space-between;
   padding: 22px 30px 6px; flex: none; }
@@ -93,8 +78,9 @@ body {
 /* ---- body ---- */
 .body { display: grid; grid-template-columns: 1fr 300px; gap: 24px;
   padding: 4px 30px 30px; flex: 1; min-height: 0; }
+.body > * { min-height: 0; }   /* let grid children scroll instead of overflowing */
 .content { background: var(--card); border: 1px solid var(--panel-border);
-  border-radius: 14px; padding: 28px 30px; min-height: 470px; overflow: auto; }
+  border-radius: 14px; padding: 28px 30px; min-height: 0; overflow-y: auto; }
 .panel { display: none; }
 .panel.active { display: block; }
 
@@ -174,9 +160,11 @@ input.field::placeholder { color: #c7b594; }
 
 /* mascot panel */
 .mascot { background: linear-gradient(170deg, #FBF3E3, #F4E8CE); border: 1px solid var(--panel-border);
-  border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 15px; }
+  border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 15px;
+  min-height: 0; overflow: auto; }
+.mascot > *:not(.art) { flex: none; }   /* keep meta/progress/transport full size */
 .mascot .np { font: 700 11px var(--mono); letter-spacing: .16em; color: #C0925A; }
-.art { width: 100%; height: 308px; border-radius: 12px; border: 2px dashed #E0C99A;
+.art { width: 100%; flex: 1 1 auto; min-height: 150px; border-radius: 12px; border: 2px dashed #E0C99A;
   background-size: cover; background-position: center; cursor: pointer; position: relative;
   display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .art.filled { border-style: solid; border-color: var(--panel-border); }

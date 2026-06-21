@@ -20,6 +20,7 @@ Two modes:
 """
 
 import time
+import base64
 import asyncio
 import threading
 
@@ -111,8 +112,10 @@ class Engine:
         self.now_playing = {
             "title": None, "artist": None, "art_url": None,
             "progress_ms": 0, "duration_ms": 0, "is_playing": False,
-            "source": None,
+            "source": None, "fetched_at": 0,
         }
+        # Cache the decoded SMTC cover so we don't re-encode it every poll.
+        self._np_art_cache = {}
 
     # ------------------------------------------------------------------ log
     def log(self, msg):
@@ -230,6 +233,7 @@ class Engine:
             "duration_ms": track.get("duration_ms") or 0,
             "is_playing": is_playing,
             "source": "spotify",
+            "fetched_at": int(time.time() * 1000),
         }
 
         with self._seen_lock:
@@ -419,6 +423,92 @@ class Engine:
             self.log(f"[i] media: couldn't read track info ({exc})")
         return (title, artist, art)
 
+    # ---- live now-playing readers (for the UI panel) -------------------
+    async def _smtc_snapshot(self):
+        """Read the current Windows media session: title/artist/art/position.
+
+        This sees the Spotify *desktop app* and browser media alike, so it's
+        the most universal source on Windows."""
+        if not MEDIA_AVAILABLE:
+            return None
+        try:
+            mgr = await MediaManager.request_async()
+        except Exception:  # noqa: BLE001
+            return None
+        session = self._pick_session(mgr)
+        if session is None:
+            return None
+        try:
+            props = await session.try_get_media_properties_async()
+        except Exception:  # noqa: BLE001
+            return None
+        title = (props.title or "").strip()
+        artist = (props.artist or "").strip()
+        if not title and not artist:
+            return None
+
+        is_playing = False
+        try:
+            info = session.get_playback_info()
+            is_playing = int(info.playback_status) == 4  # 4 = PLAYING
+        except Exception:  # noqa: BLE001
+            pass
+
+        progress_ms = duration_ms = 0
+        try:
+            tl = session.get_timeline_properties()
+            progress_ms = int(tl.position.total_seconds() * 1000)
+            span = tl.end_time.total_seconds() - tl.start_time.total_seconds()
+            duration_ms = int(max(0, span) * 1000)
+        except Exception:  # noqa: BLE001
+            pass
+
+        key = f"{title}|{artist}"
+        if key in self._np_art_cache:
+            art_url = self._np_art_cache[key]
+        else:
+            art_url = None
+            try:
+                art = await self._read_thumbnail(props)
+                if art:
+                    art_url = "data:image/jpeg;base64," + base64.b64encode(art).decode()
+            except Exception:  # noqa: BLE001
+                art_url = None
+            self._np_art_cache = {key: art_url}  # keep only the latest track
+
+        return {
+            "title": title or "Unknown", "artist": artist, "art_url": art_url,
+            "progress_ms": progress_ms, "duration_ms": duration_ms,
+            "is_playing": is_playing, "source": "media",
+        }
+
+    def read_media_now_playing(self):
+        try:
+            return asyncio.run(self._smtc_snapshot())
+        except Exception:  # noqa: BLE001
+            return None
+
+    def read_spotify_now_playing(self):
+        """Now-playing via the Spotify Web API (covers remote devices)."""
+        try:
+            pb = self._current()
+        except Exception:  # noqa: BLE001
+            return None
+        if not pb or not pb.get("item"):
+            return None
+        track = pb["item"]
+        album = track.get("album", {})
+        images = album.get("images", [])
+        return {
+            "title": track.get("name"),
+            "artist": ", ".join(a["name"] for a in track.get("artists", [])),
+            "art_url": images[0]["url"] if images else None,
+            "progress_ms": pb.get("progress_ms") or 0,
+            "duration_ms": track.get("duration_ms") or 0,
+            "is_playing": pb.get("is_playing", False),
+            "source": "spotify",
+        }
+
     def media_control(self, action, label):
         def go():
             if not MEDIA_AVAILABLE:
@@ -439,6 +529,7 @@ class Engine:
                 "title": title, "artist": artist, "art_url": art_url,
                 "progress_ms": 0, "duration_ms": 0,
                 "is_playing": True, "source": "media",
+                "fetched_at": int(time.time() * 1000),
             }
             self.notify_media("🎵 Now Playing", title, artist,
                               footer="Media mode (browser / SoundCloud)", art_bytes=art)

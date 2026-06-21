@@ -9,6 +9,7 @@ and now-playing state back to the UI.
 
 import os
 import sys
+import time
 import base64
 import threading
 import collections
@@ -19,12 +20,21 @@ except Exception:  # noqa: BLE001
     webview = None
 
 from . import __version__
-from .config import load_config, save_config, config_path
-from .engine import Engine, KEYBOARD_AVAILABLE
+from .config import load_config, save_config, config_path, token_cache_path
+from .engine import Engine, KEYBOARD_AVAILABLE, MEDIA_AVAILABLE
 from .discord_notify import Discord
 
 if KEYBOARD_AVAILABLE:
     import keyboard
+
+# Optional system-tray support (keeps hotkeys alive after closing the window).
+try:
+    import pystray
+    from PIL import Image
+    _TRAY = True
+except Exception:  # noqa: BLE001
+    pystray = None
+    _TRAY = False
 
 
 def _resource_dir():
@@ -59,14 +69,53 @@ class Api:
         self.logs = collections.deque(maxlen=400)
         self._log_lock = threading.Lock()
         self.window = None
-        self._maximized = False
+        self._allow_close = False
+        self._tray = None
         self.engine = Engine(self.config, log=self._log,
                              on_mode_change=lambda m: None)
+
+        # Always-on now-playing watcher (independent of the hotkey engine).
+        self._np_stop = threading.Event()
+        self._np_last_spotify = None
+        self._np_last_spotify_t = 0.0
+        self._np_thread = threading.Thread(target=self._np_loop, daemon=True)
+        self._np_thread.start()
 
     # -- logging ----------------------------------------------------------
     def _log(self, msg):
         with self._log_lock:
             self.logs.append(str(msg))
+
+    # -- now-playing watcher ---------------------------------------------
+    def _np_loop(self):
+        """Continuously refresh engine.now_playing from whichever source is
+        live: Windows SMTC first (Spotify desktop + browser), then the Spotify
+        Web API (covers playback on remote devices)."""
+        while not self._np_stop.is_set():
+            np = None
+            if MEDIA_AVAILABLE:
+                np = self.engine.read_media_now_playing()
+            now = time.time()
+            spec = self.config.get("spotify", {})
+            # Only hit the Web API if the user has already authorized once
+            # (token cache present) — never trigger an interactive login here.
+            if (np is None and spec.get("client_id") and spec.get("client_secret")
+                    and os.path.exists(token_cache_path())):
+                # Throttle Web API calls (~ every 4s) and reuse between checks.
+                if now - self._np_last_spotify_t >= 4:
+                    self._np_last_spotify_t = now
+                    self._np_last_spotify = self.engine.read_spotify_now_playing()
+                np = self._np_last_spotify
+            if np:
+                np["fetched_at"] = int(now * 1000)
+                self.engine.now_playing = np
+            else:
+                self.engine.now_playing = {
+                    "title": None, "artist": None, "art_url": None,
+                    "progress_ms": 0, "duration_ms": 0, "is_playing": False,
+                    "source": None, "fetched_at": int(now * 1000),
+                }
+            self._np_stop.wait(1.0)
 
     # -- config -----------------------------------------------------------
     def _apply(self, cfg):
@@ -205,29 +254,70 @@ class Api:
             pass
         return url
 
-    # -- window controls (frameless custom chrome) -----------------------
-    def minimize(self):
+    # -- close-to-tray ----------------------------------------------------
+    def on_closing(self):
+        """Window X pressed. Hide to the tray and keep running instead of
+        quitting (so the hotkeys stay alive). Returning False cancels the
+        close in pywebview. Without tray support, quit normally so the app
+        can't get stranded with no window."""
+        if self._allow_close:
+            return True
+        if not _TRAY:
+            self._quit_app()
+            return True
+        self._hide_to_tray()
+        return False
+
+    def _hide_to_tray(self):
         try:
-            self.window.minimize()
+            self.window.hide()
+        except Exception:  # noqa: BLE001
+            pass
+        self._ensure_tray()
+        self._log("[i] minimized to tray — hotkeys still active. "
+                  "Use the tray icon to reopen or quit.")
+
+    def show_window(self):
+        try:
+            self.window.show()
         except Exception:  # noqa: BLE001
             pass
 
-    def toggle_maximize(self):
-        try:
-            if self._maximized:
-                self.window.restore()
-            else:
-                self.window.maximize()
-            self._maximized = not self._maximized
-        except Exception:  # noqa: BLE001
-            pass
+    def _ensure_tray(self):
+        if not _TRAY or self._tray is not None:
+            return
+        icon_img = None
+        path = _icon_path()
+        if path:
+            try:
+                icon_img = Image.open(path)
+            except Exception:  # noqa: BLE001
+                icon_img = None
+        if icon_img is None:
+            icon_img = Image.new("RGB", (64, 64), "#CC7E4F")
+        menu = pystray.Menu(
+            pystray.MenuItem("Open MediaHotKey",
+                             lambda icon, item: self.show_window(), default=True),
+            pystray.MenuItem("Start / Stop hotkeys",
+                             lambda icon, item: self.toggle_engine(None)),
+            pystray.MenuItem("Quit", lambda icon, item: self._quit_app()),
+        )
+        self._tray = pystray.Icon("MediaHotKey", icon_img, "MediaHotKey", menu)
+        threading.Thread(target=self._tray.run, daemon=True).start()
 
-    def close(self):
+    def _quit_app(self):
+        self._allow_close = True
+        self._np_stop.set()
         try:
             if self.engine.running:
                 self.engine.stop()
         except Exception:  # noqa: BLE001
             pass
+        if self._tray is not None:
+            try:
+                self._tray.stop()
+            except Exception:  # noqa: BLE001
+                pass
         try:
             self.window.destroy()
         except Exception:  # noqa: BLE001
@@ -315,22 +405,32 @@ def main():
         f"MediaHotKey {__version__}",
         url=index,
         js_api=api,
-        width=1100,
-        height=820,
-        min_size=(960, 720),
-        frameless=True,
-        easy_drag=False,
+        width=1120,
+        height=860,
+        min_size=(720, 520),     # can be shrunk small or dragged large
+        resizable=True,
+        frameless=False,         # native frame → resize from edges + min/max/close
         background_color="#F6EFE1",
     )
     api.window = window
 
-    if api.config["settings"].get("start_engine_on_launch"):
+    # Closing the X hides to the tray (hotkeys keep running) instead of quitting.
+    try:
+        window.events.closing += api.on_closing
+    except Exception:  # noqa: BLE001
+        pass
+
+    settings = api.config["settings"]
+    if settings.get("start_engine_on_launch"):
         def _autostart():
             try:
                 api.engine.start()
             except Exception as exc:  # noqa: BLE001
                 api._log(f"[!] {exc}")
         threading.Timer(1.0, _autostart).start()
+
+    if _TRAY and settings.get("start_minimized"):
+        threading.Timer(0.8, api._hide_to_tray).start()
 
     # Force the modern Chromium (WebView2) backend on Windows so the UI's
     # modern JS runs; fall back gracefully on other platforms / old pywebview.

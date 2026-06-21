@@ -185,17 +185,31 @@ function setArt(url) {
   }
 }
 
+let curNP = null;        // last now-playing payload from the backend
 function renderNowPlaying(np) {
-  if (!np) np = {};
+  np = np || {};
+  curNP = np;
   $('#np-title').textContent = np.title || '—';
-  $('#np-artist').textContent = np.artist || 'not playing';
-  const dur = np.duration_ms || 0, cur = np.progress_ms || 0;
+  $('#np-artist').textContent = np.artist || (np.title ? '' : 'not playing');
+  $('#tp-play').textContent = np.is_playing ? '❚❚' : '▶';
+  setArt(np.art_url);
+  tickProgress();
+}
+
+// Advance the progress bar smoothly between backend updates by extrapolating
+// from the fetch timestamp while the track is playing.
+function tickProgress() {
+  const np = curNP;
+  if (!np) return;
+  const dur = np.duration_ms || 0;
+  let cur = np.progress_ms || 0;
+  if (np.is_playing && np.fetched_at) cur += Date.now() - np.fetched_at;
+  if (dur) cur = Math.min(cur, dur);
   $('#np-cur').textContent = fmt(cur);
   $('#np-dur').textContent = fmt(dur);
   $('#np-fill').style.width = dur ? Math.min(100, cur / dur * 100) + '%' : '0';
-  $('#tp-play').textContent = np.is_playing ? '❚❚' : '▶';
-  setArt(np.art_url);
 }
+setInterval(tickProgress, 500);
 
 // ---------- status / caps ----------
 function renderCaps(caps) {
@@ -267,9 +281,6 @@ function wire() {
   $('#tp-prev').onclick = () => api().transport('prev', cfg);
   $('#tp-next').onclick = () => api().transport('next', cfg);
   $('#tp-play').onclick = () => api().transport('playpause', cfg);
-  $('#btn-min').onclick = () => api().minimize();
-  $('#btn-max').onclick = () => api().toggle_maximize();
-  $('#btn-close').onclick = () => api().close();
 }
 
 // ---------- boot ----------

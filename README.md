@@ -25,8 +25,16 @@ Mono) with five tabs and a persistent **now-playing panel**:
 - **Log** — live activity feed
 
 …plus a **Start / Stop hotkeys** button, a pulsing *Running* pill, live capability
-checks (`keyboard ✓  spotify ✓  media/SMTC ✓`), and a now-playing card with album
-art, progress and transport controls.
+checks (`keyboard ✓  spotify ✓  media/SMTC ✓`), and a **live now-playing card**
+with album art, a ticking progress bar and transport controls.
+
+- **Live now-playing** — the card updates in real time from whatever's actually
+  playing: Windows media (SMTC — catches the Spotify desktop app *and* browser
+  audio) and the Spotify Web API (catches playback on other devices).
+- **Resizable** — drag any edge/corner to resize; native minimize/maximize/close.
+- **Close to tray** — clicking ✕ tucks the app into the system tray and keeps the
+  hotkeys running. Reopen or quit from the tray icon. (Set *Launch minimized to
+  the system tray* in General to start there.)
 
 The UI is HTML/CSS/JS rendered in a native window via **pywebview**; the Python
 **engine** does the actual hotkey / Spotify / media work behind a small JS bridge.
