@@ -67,7 +67,14 @@ const MOCK = {
   clear_log: async () => { DEMO.logs = []; return { ok: true }; },
   minimize: () => {}, toggle_maximize: () => {}, close: () => {},
 };
-const api = () => (window.pywebview && window.pywebview.api) || MOCK;
+// The pywebview bridge creates window.pywebview.api as an empty object first,
+// then attaches the Python methods a moment later. Only treat it as "real"
+// once an actual method is present; otherwise use the demo MOCK.
+function bridgeReady() {
+  return !!(window.pywebview && window.pywebview.api &&
+            typeof window.pywebview.api.get_state === 'function');
+}
+const api = () => (bridgeReady() ? window.pywebview.api : MOCK);
 
 // ---------- rendering ----------
 function renderTabs() {
@@ -267,15 +274,22 @@ function wire() {
 
 // ---------- boot ----------
 async function boot() {
-  const state = await api().get_state();
-  cfg = state.config;
+  let state;
+  try {
+    state = await api().get_state();
+  } catch (e) {
+    state = await MOCK.get_state();   // never blank the page if the call fails
+  }
+  cfg = state.config || {};
+  cfg.spotify = cfg.spotify || {}; cfg.discord = cfg.discord || {};
+  cfg.hotkeys = cfg.hotkeys || {}; cfg.settings = cfg.settings || {};
   if (!cfg.mascot) cfg.mascot = {};
   mascotImage = cfg.mascot.image || '';
-  $('#cfgpath').textContent = 'Config file: ' + state.config_path;
+  $('#cfgpath').textContent = 'Config file: ' + (state.config_path || '');
 
   renderTabs(); renderPanels(); renderHotkeys(); renderOpts(); renderSeg();
   fillFields(); bindFields(); wire();
-  renderCaps(state.caps);
+  renderCaps(state.caps || {});
   renderRunning(state.running, state.mode);
   setArt(null);
 
@@ -316,18 +330,28 @@ function showError(err) {
 }
 window.addEventListener('error', (e) => showError(e.error || e.message));
 
-// Wait for the pywebview bridge (it attaches window.pywebview.api slightly
-// after load); fall back to demo data after ~3s so the UI is never blank.
+// Wait until the pywebview bridge has actually attached its methods (not just
+// the empty placeholder object).
+//  - In a plain browser (no window.pywebview at all) → use demo data after ~1.5s.
+//  - Inside the app (window.pywebview exists) → keep waiting up to ~20s for the
+//    methods so we never boot the real app on demo data (which Save could then
+//    write over the real config).
 function waitForBridge(cb) {
-  if (window.pywebview && window.pywebview.api) return cb();
+  if (bridgeReady()) return cb();
   let tries = 0;
   const timer = setInterval(() => {
-    if ((window.pywebview && window.pywebview.api) || ++tries > 16) {
-      clearInterval(timer);
-      cb();
-    }
+    tries++;
+    if (bridgeReady()) { clearInterval(timer); return cb(); }
+    const inApp = !!window.pywebview;
+    if (!inApp && tries > 7) { clearInterval(timer); return cb(); }   // browser preview
+    if (inApp && tries > 100) { clearInterval(timer); return cb(); }  // give up ~20s
   }, 200);
-  window.addEventListener('pywebviewready', () => { clearInterval(timer); cb(); });
+  window.addEventListener('pywebviewready', () => {
+    const t2 = setInterval(() => {
+      if (bridgeReady()) { clearInterval(t2); clearInterval(timer); cb(); }
+    }, 50);
+    setTimeout(() => clearInterval(t2), 5000);
+  });
 }
 
 window.addEventListener('DOMContentLoaded', () => waitForBridge(go));
