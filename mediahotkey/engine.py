@@ -382,7 +382,15 @@ class Engine:
         buffer = Buffer(size)
         await stream.read_async(buffer, size, InputStreamOptions.READ_AHEAD)
         reader = DataReader.from_buffer(buffer)
-        return bytes(reader.read_bytes(buffer.length))
+        n = buffer.length
+        # winsdk's DataReader.read_bytes fills a bytearray you pass in (and
+        # returns None); older builds returned bytes for a count argument.
+        try:
+            out = bytearray(n)
+            reader.read_bytes(out)
+            return bytes(out)
+        except TypeError:
+            return bytes(reader.read_bytes(n))
 
     @staticmethod
     async def _media_do(session, action):
@@ -532,9 +540,9 @@ class Engine:
                     art_url = "data:image/jpeg;base64," + base64.b64encode(art).decode()
                     self._np_art_cache = {key: art_url}
                 else:
-                    self._dbg("smtc", f"thumbnail empty for {title!r} ({aumid})")
+                    self._dbg("smtc-art", f"thumbnail empty for {title!r} ({aumid})")
             except Exception as exc:  # noqa: BLE001
-                self._dbg("smtc", f"thumbnail read error for {title!r}: {exc}")
+                self._dbg("smtc-art", f"thumbnail read error for {title!r}: {exc}")
                 art_url = None
 
         self._dbg("smtc", f"app={aumid} title={title!r} playing={is_playing} "
