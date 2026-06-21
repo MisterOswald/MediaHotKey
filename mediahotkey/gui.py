@@ -137,8 +137,12 @@ class Api:
             save_config(self.config)
         except Exception as exc:  # noqa: BLE001
             self._log(f"[!] couldn't save config: {exc}")
-        # keep the engine pointed at the same (now-updated) config object
+        # keep the engine pointed at the same (now-updated) config object,
+        # and sync its Discord webhook so a saved URL takes effect immediately
+        # on the already-running engine (not just after a restart).
         self.engine.config = self.config
+        self.engine.discord.webhook_url = (
+            self.config.get("discord", {}).get("webhook_url", "") or "").strip()
 
     def get_state(self):
         return {
