@@ -292,6 +292,16 @@ class Api:
             self._log(f"[!] transport {action}: {exc}")
         return {"ok": True}
 
+    def add_to_playlist(self):
+        # Add the current Spotify track to its playlist (or Liked Songs) — same
+        # as the Alt+F9 hotkey. Works via the Web API on free accounts too.
+        self.engine.sp_add()
+        return {"ok": True}
+
+    def like(self):
+        self.engine.sp_like()
+        return {"ok": True}
+
     # -- tests ------------------------------------------------------------
     def test_spotify(self, cfg=None):
         self._apply(cfg)

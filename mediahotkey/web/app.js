@@ -284,6 +284,8 @@ function wire() {
   $('#tp-prev').onclick = () => api().transport('prev', cfg);
   $('#tp-next').onclick = () => api().transport('next', cfg);
   $('#tp-play').onclick = () => api().transport('playpause', cfg);
+  $('#np-add').onclick = () => { api().add_to_playlist(); toast('Adding to playlist…'); };
+  $('#np-like').onclick = () => { api().like(); toast('Saving to Liked Songs…'); };
 
   $('#btn-check-update').onclick = async () => {
     $('#upd-status').textContent = 'checking…';
