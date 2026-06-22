@@ -559,7 +559,12 @@ def main():
     settings = api.config["settings"]
     start_hidden = bool(_TRAY and settings.get("start_minimized"))
 
-    win_kwargs = dict(
+    # Create the window NORMALLY (never hidden at creation) — a hidden WebView2
+    # window can stall its own initialization on a cold start and wedge the main
+    # GUI thread, which makes the tray icon unresponsive. We hide to the tray
+    # only AFTER the page has finished loading (below).
+    window = webview.create_window(
+        f"MediaHotKey {__version__}",
         url=index,
         js_api=api,
         width=1120,
@@ -569,12 +574,6 @@ def main():
         frameless=False,         # native frame → resize from edges + min/max/close
         background_color="#F6EFE1",
     )
-    try:
-        window = webview.create_window(
-            f"MediaHotKey {__version__}", hidden=start_hidden, **win_kwargs)
-    except TypeError:
-        # older pywebview without the hidden= kwarg
-        window = webview.create_window(f"MediaHotKey {__version__}", **win_kwargs)
     api.window = window
 
     # Closing the X hides to the tray (hotkeys keep running) instead of quitting.
@@ -583,18 +582,27 @@ def main():
     except Exception:  # noqa: BLE001
         pass
 
-    def _on_started():
-        # Runs on a worker thread once the GUI loop is up — the safe point to
-        # touch the window, start the tray, and kick off the engine (avoids the
-        # startup race that could wedge the tray icon).
-        if start_hidden:
-            try:
-                api.window.hide()   # belt-and-suspenders if hidden= was ignored
-            except Exception:  # noqa: BLE001
-                pass
-            api._ensure_tray()
-            api._log("[i] started minimized to the system tray.")
+    api._did_init = False
+
+    def _post_init():
+        # Runs once, only after WebView2 has fully initialized and the page has
+        # loaded — the only safe point to hide the window / start the tray
+        # without deadlocking the GUI thread on a cold start.
+        if api._did_init:
+            return
+        api._did_init = True
         _apply_window_icon()
+        if start_hidden:
+            api._ensure_tray()
+            # Defer the hide a touch so it runs after the loaded-event dispatch
+            # returns and the GUI thread is idle (avoids re-entrancy).
+            def _hide():
+                try:
+                    api.window.hide()
+                except Exception:  # noqa: BLE001
+                    pass
+            threading.Timer(0.4, _hide).start()
+            api._log("[i] started minimized to the system tray.")
         if settings.get("start_engine_on_launch"):
             try:
                 api.engine.start()
@@ -603,11 +611,23 @@ def main():
         if settings.get("update_check_on_launch"):
             threading.Thread(target=api._launch_update_check, daemon=True).start()
 
+    # Primary trigger: the page-loaded event (fires once WebView2 is ready).
+    try:
+        window.events.loaded += lambda *a: _post_init()
+    except Exception:  # noqa: BLE001
+        pass
+
+    def _fallback():
+        # Safety net in case the loaded event never arrives: give WebView2 a
+        # few seconds to settle, then run init anyway.
+        time.sleep(3.0)
+        _post_init()
+
     # Force the modern Chromium (WebView2) backend on Windows so the UI's
     # modern JS runs; fall back gracefully on other platforms / old pywebview.
     gui = "edgechromium" if sys.platform.startswith("win") else None
     try:
-        webview.start(_on_started, gui=gui) if gui else webview.start(_on_started)
+        webview.start(_fallback, gui=gui) if gui else webview.start(_fallback)
     except Exception as exc:  # noqa: BLE001
         _message_box(
             "MediaHotKey couldn't open its window.\n\n"
