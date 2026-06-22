@@ -75,20 +75,26 @@ class Api:
         self.engine = Engine(self.config, log=self._log,
                              on_mode_change=lambda m: None)
 
-        # Always-on now-playing watcher (independent of the hotkey engine).
+        # Now-playing watcher (started AFTER the window loads — see
+        # start_now_playing — so its COM/winsdk work doesn't contend with
+        # WebView2's cold start and slow the launch).
         self._np_stop = threading.Event()
         self._np_last_spotify = None
         self._np_last_spotify_t = 0.0
         self._np_misses = 0
         self._np_art_by_track = {}   # {"title|artist": art_url} — stable cover
         self._np_last_sig = None
+        self._np_thread = None
         self._update_info = {}       # last update-check result (for the UI)
         caps = Engine.capabilities()
         self._log(f"[dbg:init] keyboard={caps['keyboard']} spotipy={caps['spotipy']} "
                   f"media/SMTC={caps['media']} token_cache="
                   f"{os.path.exists(token_cache_path())}")
-        self._np_thread = threading.Thread(target=self._np_loop, daemon=True)
-        self._np_thread.start()
+
+    def start_now_playing(self):
+        if self._np_thread is None:
+            self._np_thread = threading.Thread(target=self._np_loop, daemon=True)
+            self._np_thread.start()
 
     # -- logging ----------------------------------------------------------
     def _log(self, msg):
@@ -340,6 +346,44 @@ class Api:
         import webbrowser
         webbrowser.open(url)
         return {"ok": True}
+
+    def create_shortcut(self):
+        """Create a 'MediaHotKey' shortcut on the Desktop pointing at this app."""
+        if not sys.platform.startswith("win"):
+            return {"ok": False, "msg": "Desktop shortcuts are Windows-only."}
+        desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+        lnk = os.path.join(desktop, "MediaHotKey.lnk")
+        icon = _icon_path() or ""
+        if updater.is_frozen():
+            target, args, workdir = sys.executable, "", os.path.dirname(sys.executable)
+            if not icon:
+                icon = sys.executable
+        else:
+            base = os.path.dirname(sys.executable)
+            pyw = os.path.join(base, "pythonw.exe")
+            target = pyw if os.path.exists(pyw) else sys.executable
+            run_py = os.path.join(updater.install_dir(), "run.py")
+            args = f'"{run_py}"'
+            workdir = updater.install_dir()
+        ps = (
+            "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{lnk}');"
+            "$s.TargetPath='{target}';$s.Arguments='{args}';"
+            "$s.WorkingDirectory='{workdir}';{icon}$s.Save()"
+        ).format(
+            lnk=lnk.replace("'", "''"),
+            target=target.replace("'", "''"),
+            args=args.replace("'", "''"),
+            workdir=workdir.replace("'", "''"),
+            icon=(f"$s.IconLocation='{icon.replace(chr(39), chr(39) * 2)}';" if icon else ""),
+        )
+        try:
+            import subprocess
+            subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                           check=True, creationflags=0x08000000)  # CREATE_NO_WINDOW
+            self._log("[i] created a Desktop shortcut.")
+            return {"ok": True, "msg": "Desktop shortcut created."}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "msg": f"Couldn't create shortcut: {exc}"}
 
     def choose_mascot(self):
         if not self.window:
@@ -654,8 +698,14 @@ def main():
                 api.engine.start()
             except Exception as exc:  # noqa: BLE001
                 api._log(f"[!] {exc}")
+        # Start the now-playing watcher now that the window is up, and defer the
+        # update check a few seconds so neither competes with WebView2's init.
+        api.start_now_playing()
         if settings.get("update_check_on_launch"):
-            threading.Thread(target=api._launch_update_check, daemon=True).start()
+            threading.Timer(
+                5.0,
+                lambda: threading.Thread(target=api._launch_update_check,
+                                         daemon=True).start()).start()
 
     def _kick(*_a):
         # Offload to a worker thread so we never block the main GUI thread.

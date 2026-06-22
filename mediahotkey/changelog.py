@@ -2,6 +2,14 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.9",
+        "notes": [
+            "Faster startup: the now-playing watcher and update check no longer "
+            "run during WebView2's cold start, and the .exe bundle is trimmed.",
+            "Added a 'Create desktop shortcut' button (General → Updates).",
+        ],
+    },
+    {
         "version": "1.0.8",
         "notes": [
             "The standalone .exe can now self-update: GitHub Actions builds it "

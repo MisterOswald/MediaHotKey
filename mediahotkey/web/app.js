@@ -73,6 +73,7 @@ const MOCK = {
       'Added this patch-notes dropdown.'] },
     { version: '1.0.4', notes: ['Add to playlist / Like buttons in now-playing.'] },
   ],
+  create_shortcut: async () => ({ ok: true, msg: 'Desktop shortcut created (demo).' }),
   minimize: () => {}, toggle_maximize: () => {}, close: () => {},
 };
 // The pywebview bridge creates window.pywebview.api as an empty object first,
@@ -309,6 +310,10 @@ function wire() {
     }
   };
   $('#btn-restart').onclick = () => api().relaunch();
+  $('#btn-shortcut').onclick = async () => {
+    const r = await api().create_shortcut();
+    toast(r && r.msg ? r.msg : 'Done');
+  };
 
   const dpt = $('#discord-pause-toggle');
   dpt.classList.toggle('on', !!(cfg.discord && cfg.discord.paused));
