@@ -495,8 +495,10 @@ def _apply_window_icon(retries=12):
         u.LoadImageW.restype = wintypes.HANDLE
         u.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT,
                                  ctypes.c_int, ctypes.c_int, wintypes.UINT]
-        u.SendMessageW.restype = wintypes.LPARAM
-        u.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT,
+        # PostMessageW (not SendMessageW) so this can never block on a
+        # cross-thread send if the GUI thread is momentarily busy.
+        u.PostMessageW.restype = wintypes.BOOL
+        u.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT,
                                    wintypes.WPARAM, wintypes.LPARAM]
         title = f"MediaHotKey {__version__}"
         IMAGE_ICON, WM_SETICON = 1, 0x0080
@@ -509,9 +511,9 @@ def _apply_window_icon(retries=12):
                                    LR_LOADFROMFILE | LR_DEFAULTSIZE)
                 small = u.LoadImageW(None, ico, IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
                 if big:
-                    u.SendMessageW(hwnd, WM_SETICON, ICON_BIG, big)
+                    u.PostMessageW(hwnd, WM_SETICON, ICON_BIG, big)
                 if small:
-                    u.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small)
+                    u.PostMessageW(hwnd, WM_SETICON, ICON_SMALL, small)
                 return
             time.sleep(0.3)
     except Exception:  # noqa: BLE001
@@ -583,25 +585,26 @@ def main():
         pass
 
     api._did_init = False
+    init_lock = threading.Lock()
 
     def _post_init():
-        # Runs once, only after WebView2 has fully initialized and the page has
-        # loaded — the only safe point to hide the window / start the tray
-        # without deadlocking the GUI thread on a cold start.
-        if api._did_init:
-            return
-        api._did_init = True
+        # IMPORTANT: this must never run on the main GUI thread. The
+        # edgechromium backend dispatches events and the JS<->Python bridge on
+        # the main thread, so any blocking work here would freeze the window
+        # ("Not Responding") and stall get_state(), leaving the UI blank. We
+        # always run it on a worker thread (see _kick) and only touch the
+        # window through pywebview's thread-safe methods.
+        with init_lock:
+            if api._did_init:
+                return
+            api._did_init = True
         _apply_window_icon()
         if start_hidden:
             api._ensure_tray()
-            # Defer the hide a touch so it runs after the loaded-event dispatch
-            # returns and the GUI thread is idle (avoids re-entrancy).
-            def _hide():
-                try:
-                    api.window.hide()
-                except Exception:  # noqa: BLE001
-                    pass
-            threading.Timer(0.4, _hide).start()
+            try:
+                api.window.hide()
+            except Exception:  # noqa: BLE001
+                pass
             api._log("[i] started minimized to the system tray.")
         if settings.get("start_engine_on_launch"):
             try:
@@ -611,17 +614,20 @@ def main():
         if settings.get("update_check_on_launch"):
             threading.Thread(target=api._launch_update_check, daemon=True).start()
 
-    # Primary trigger: the page-loaded event (fires once WebView2 is ready).
+    def _kick(*_a):
+        # Offload to a worker thread so we never block the main GUI thread.
+        threading.Thread(target=_post_init, daemon=True).start()
+
+    # Primary trigger: page-loaded event. Secondary: a timed fallback in case
+    # the event never arrives. Both just kick the worker; _did_init dedupes.
     try:
-        window.events.loaded += lambda *a: _post_init()
+        window.events.loaded += _kick
     except Exception:  # noqa: BLE001
         pass
 
     def _fallback():
-        # Safety net in case the loaded event never arrives: give WebView2 a
-        # few seconds to settle, then run init anyway.
         time.sleep(3.0)
-        _post_init()
+        _kick()
 
     # Force the modern Chromium (WebView2) backend on Windows so the UI's
     # modern JS runs; fall back gracefully on other platforms / old pywebview.
