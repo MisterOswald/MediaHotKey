@@ -1,0 +1,60 @@
+name: Build Windows exe
+
+# Builds MediaHotKey.exe on every push to main and publishes it as a release
+# asset (tag v<version>), which the in-app self-updater downloads.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'mediahotkey/**'
+      - 'assets/**'
+      - 'run.py'
+      - 'requirements.txt'
+      - '.github/workflows/build-exe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Read version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = python -c "import mediahotkey; print(mediahotkey.__version__)"
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Build MediaHotKey.exe
+        run: >
+          pyinstaller --noconfirm --clean --onefile --windowed
+          --name MediaHotKey
+          --icon assets/icon.ico
+          --add-data "mediahotkey/web;mediahotkey/web"
+          --add-data "assets/icon.ico;assets"
+          --collect-all webview
+          --collect-all winsdk
+          run.py
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: v${{ steps.ver.outputs.version }}
+          body: "Automated build of MediaHotKey v${{ steps.ver.outputs.version }}."
+          files: dist/MediaHotKey.exe
+          fail_on_unmatched_files: true

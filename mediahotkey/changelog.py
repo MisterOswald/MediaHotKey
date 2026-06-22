@@ -2,6 +2,14 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.8",
+        "notes": [
+            "The standalone .exe can now self-update: GitHub Actions builds it "
+            "on each release and 'Update now' downloads the new .exe and swaps "
+            "it in on restart.",
+        ],
+    },
+    {
         "version": "1.0.7",
         "notes": [
             "Fixed a crash dialog on close — the window-close and tray handlers "

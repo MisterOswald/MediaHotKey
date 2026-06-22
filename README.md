@@ -133,9 +133,16 @@ MediaHotKey can update itself from this GitHub repo. In **General → Updates**:
 - Toggles: *Check for updates on launch* (on by default) and *Automatically
   install updates on launch*.
 
-Updating works for **source installs** (running the `.py`/`.pyw`). The frozen
-`.exe` can't rewrite its own running binary — rebuild it with `build_exe.bat` to
-update.
+Updating works for both:
+
+- **Source installs** (`.py`/`.pyw`) — downloads the latest `main` and copies it
+  over the app folder.
+- **The standalone `.exe`** — GitHub Actions builds `MediaHotKey.exe` on every
+  push and publishes it to a `v<version>` [release](https://github.com/MisterOswald/MediaHotKey/releases).
+  *Update now* downloads that exe and a tiny helper swaps it in on restart.
+
+> First-time bootstrap for the exe: grab `MediaHotKey.exe` once from the latest
+> release (or build it with `build_exe.bat`). After that it self-updates.
 
 ## Command-line / headless
 
