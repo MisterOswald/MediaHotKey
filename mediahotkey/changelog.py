@@ -2,6 +2,13 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.11",
+        "notes": [
+            "Test build to verify the in-app auto-update — if you can read this "
+            "in the app, the update worked. 🎉",
+        ],
+    },
+    {
         "version": "1.0.10",
         "notes": [
             "Fixed exe self-update: it now only updates when there's a genuinely "
