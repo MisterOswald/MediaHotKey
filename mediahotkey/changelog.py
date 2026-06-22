@@ -2,6 +2,15 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.10",
+        "notes": [
+            "Fixed exe self-update: it now only updates when there's a genuinely "
+            "newer release (no more 'updating' to the same version), and the "
+            "exe-swap on restart is far more reliable (waits for full exit, "
+            "retries, and logs to mhk_update.log).",
+        ],
+    },
+    {
         "version": "1.0.9",
         "notes": [
             "Faster startup: the now-playing watcher and update check no longer "

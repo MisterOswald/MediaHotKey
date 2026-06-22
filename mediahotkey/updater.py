@@ -141,13 +141,24 @@ def _copy_tree(src_root, dst_root):
 
 def _apply_update_frozen(progress):
     """Download the new MediaHotKey.exe next to the running one; the actual
-    swap happens on restart (see relaunch)."""
+    swap happens on restart (see relaunch). Only proceeds if the latest release
+    is actually newer than what's running."""
     global _pending_exe
+    from . import __version__
+    try:
+        rel = latest_release()
+    except Exception as exc:  # noqa: BLE001
+        return False, f"Couldn't reach GitHub: {exc}"
+    tag = rel.get("tag", "")
+    if _ver_tuple(tag) <= _ver_tuple(__version__):
+        return False, f"You're already on the latest version ({__version__})."
+    url = rel.get("assets", {}).get("MediaHotKey.exe") or EXE_DOWNLOAD
+
     cur = sys.executable
     new = cur + ".new"
-    progress("Downloading the new MediaHotKey.exe…")
+    progress(f"Downloading {tag}…")
     try:
-        req = urllib.request.Request(EXE_DOWNLOAD, headers={"User-Agent": UA})
+        req = urllib.request.Request(url, headers={"User-Agent": UA})
         with urllib.request.urlopen(req, timeout=600) as r, open(new, "wb") as fh:
             shutil.copyfileobj(r, fh)
     except Exception as exc:  # noqa: BLE001
@@ -157,10 +168,9 @@ def _apply_update_frozen(progress):
             os.remove(new)
         except OSError:
             pass
-        return False, ("Couldn't get the new .exe — has a release been published "
-                       "yet? (GitHub Actions builds it on push.)")
+        return False, "Couldn't get the new .exe — try again in a minute."
     _pending_exe = (new, cur)
-    return True, "Update downloaded. Click Restart to apply."
+    return True, f"Update to {tag} downloaded. Click Restart to apply."
 
 
 def apply_update(progress=lambda m: None):
@@ -204,18 +214,31 @@ def apply_update(progress=lambda m: None):
 
 
 def _spawn_swap(new, cur):
-    """Detached batch: wait for this process to exit, swap the exe, relaunch."""
+    """Detached batch: wait for this process to fully exit, let Windows release
+    the exe's file lock, swap the new exe in (with retries), then relaunch."""
     pid = os.getpid()
+    name = os.path.basename(cur)
+    folder = os.path.dirname(cur)
+    log = os.path.join(folder, "mhk_update.log")
     bat = cur + ".update.bat"
     script = (
         "@echo off\r\n"
+        f'echo [%date% %time%] waiting for {name} (PID {pid}) to exit > "{log}"\r\n'
         ":wait\r\n"
-        f'tasklist /fi "PID eq {pid}" | find "{pid}" >nul\r\n'
+        # Match the image name within the PID-filtered list — reliable both
+        # while running and once gone.
+        f'tasklist /fi "pid eq {pid}" /nh 2>nul | findstr /i "{name}" >nul\r\n'
         "if not errorlevel 1 (\r\n"
         "  ping 127.0.0.1 -n 2 >nul\r\n"
         "  goto wait\r\n"
         ")\r\n"
-        f'move /y "{new}" "{cur}" >nul\r\n'
+        # Settle so the OS releases the file handle, then try the swap a few
+        # times with increasing waits (no del of new == move failed).
+        "ping 127.0.0.1 -n 3 >nul\r\n"
+        f'move /y "{new}" "{cur}" >> "{log}" 2>&1\r\n'
+        f'if exist "{new}" ( ping 127.0.0.1 -n 4 >nul & move /y "{new}" "{cur}" >> "{log}" 2>&1 )\r\n'
+        f'if exist "{new}" ( ping 127.0.0.1 -n 6 >nul & move /y "{new}" "{cur}" >> "{log}" 2>&1 )\r\n'
+        f'echo [%date% %time%] relaunching >> "{log}"\r\n'
         f'start "" "{cur}"\r\n'
         'del "%~f0"\r\n'
     )
