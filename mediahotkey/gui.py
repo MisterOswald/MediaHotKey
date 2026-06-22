@@ -641,6 +641,12 @@ def main():
             "--disable-features=msSmartScreenProtection,EdgeCollections,"
             "msWebOOUI,msPdfOOUI")
 
+    # Clean up any leftovers from a previous self-update (e.g. the old exe).
+    try:
+        updater.cleanup_stale()
+    except Exception:  # noqa: BLE001
+        pass
+
     api = Api()
     index = os.path.join(_resource_dir(), "index.html")
     settings = api.config["settings"]

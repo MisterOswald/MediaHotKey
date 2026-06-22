@@ -213,51 +213,58 @@ def apply_update(progress=lambda m: None):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def _spawn_swap(new, cur):
-    """Detached batch: wait for this process to fully exit, let Windows release
-    the exe's file lock, swap the new exe in (with retries), then relaunch."""
-    pid = os.getpid()
-    name = os.path.basename(cur)
-    folder = os.path.dirname(cur)
-    log = os.path.join(folder, "mhk_update.log")
-    bat = cur + ".update.bat"
-    script = (
-        "@echo off\r\n"
-        f'echo [%date% %time%] waiting for {name} (PID {pid}) to exit > "{log}"\r\n'
-        ":wait\r\n"
-        # Match the image name within the PID-filtered list — reliable both
-        # while running and once gone.
-        f'tasklist /fi "pid eq {pid}" /nh 2>nul | findstr /i "{name}" >nul\r\n'
-        "if not errorlevel 1 (\r\n"
-        "  ping 127.0.0.1 -n 2 >nul\r\n"
-        "  goto wait\r\n"
-        ")\r\n"
-        # Settle so the OS releases the file handle, then try the swap a few
-        # times with increasing waits (no del of new == move failed).
-        "ping 127.0.0.1 -n 3 >nul\r\n"
-        f'move /y "{new}" "{cur}" >> "{log}" 2>&1\r\n'
-        f'if exist "{new}" ( ping 127.0.0.1 -n 4 >nul & move /y "{new}" "{cur}" >> "{log}" 2>&1 )\r\n'
-        f'if exist "{new}" ( ping 127.0.0.1 -n 6 >nul & move /y "{new}" "{cur}" >> "{log}" 2>&1 )\r\n'
-        f'echo [%date% %time%] relaunching >> "{log}"\r\n'
-        f'start "" "{cur}"\r\n'
-        'del "%~f0"\r\n'
-    )
-    with open(bat, "w", encoding="utf-8") as fh:
-        fh.write(script)
-    CREATE_NO_WINDOW = 0x08000000
-    DETACHED_PROCESS = 0x00000008
-    subprocess.Popen(["cmd", "/c", bat], close_fds=True,
-                     creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS)
+def cleanup_stale():
+    """Remove leftovers from older/failed update attempts (called at startup)."""
+    if not is_frozen():
+        return
+    cur = sys.executable
+    for suffix in (".old", ".new", ".update.bat"):
+        p = cur + suffix
+        try:
+            if os.path.exists(p):
+                os.remove(p)
+        except OSError:
+            pass
+
+
+def _swap_and_launch(new, cur):
+    """Swap a freshly downloaded exe in WITHOUT a helper batch.
+
+    Windows won't let you delete/overwrite a running .exe, but it *does* let you
+    rename it. So: move the running exe aside (.old), move the new exe into its
+    place, then launch it. The .old file is cleaned up on the next start."""
+    old = cur + ".old"
+    try:
+        if os.path.exists(old):
+            try:
+                os.remove(old)
+            except OSError:
+                pass
+        os.rename(cur, old)          # allowed even while running
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        os.replace(new, cur)         # put the new exe at the original path
+    except Exception:  # noqa: BLE001
+        try:
+            os.rename(old, cur)      # roll back
+        except OSError:
+            pass
+        return False
+    try:
+        subprocess.Popen([cur], cwd=os.path.dirname(cur), close_fds=True)
+    except Exception:  # noqa: BLE001
+        return False
     return True
 
 
 def relaunch():
     """Start a fresh copy of the app (the caller should then quit). For a frozen
-    build with a downloaded update pending, hand off to the swap batch instead."""
+    build with a downloaded update pending, swap the exe in first."""
     try:
         if is_frozen():
             if _pending_exe:
-                return _spawn_swap(*_pending_exe)
+                return _swap_and_launch(*_pending_exe)
             subprocess.Popen([sys.executable], cwd=install_dir(), close_fds=True)
         else:
             run_py = os.path.join(install_dir(), "run.py")

@@ -2,6 +2,14 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.12",
+        "notes": [
+            "Reworked exe self-update to be reliable and silent — no more stuck "
+            "console window. It renames the running exe aside, drops the new one "
+            "in, and relaunches (the way real auto-updaters do).",
+        ],
+    },
+    {
         "version": "1.0.11",
         "notes": [
             "Test build to verify the in-app auto-update — if you can read this "
