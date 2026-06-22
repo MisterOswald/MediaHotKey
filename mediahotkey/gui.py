@@ -96,9 +96,11 @@ class Api:
 
     # -- now-playing watcher ---------------------------------------------
     def _np_loop(self):
-        """Continuously refresh engine.now_playing from whichever source is
-        live: Windows SMTC first (Spotify desktop + browser), then the Spotify
-        Web API (covers playback on remote devices)."""
+        """Continuously refresh engine.now_playing. Windows SMTC is preferred
+        (it sees the Spotify desktop app + browser, gives smooth local position,
+        and — crucially — lets the panel transport control playback without
+        Premium); the Spotify Web API is the fallback for remote-device
+        playback."""
         while not self._np_stop.is_set():
             np = None
             now = time.time()
@@ -108,26 +110,14 @@ class Api:
             can_spotify = bool(spec.get("client_id") and spec.get("client_secret")
                                and os.path.exists(token_cache_path()))
 
-            def _spotify():
+            if MEDIA_AVAILABLE:
+                np = self.engine.read_media_now_playing()
+            if np is None and can_spotify:
                 # Throttled (~3s) + reused between checks.
                 if now - self._np_last_spotify_t >= 3:
                     self._np_last_spotify_t = now
                     self._np_last_spotify = self.engine.read_spotify_now_playing()
-                return self._np_last_spotify
-
-            if self.engine.mode == "spotify":
-                # Spotify mode → Web API first (reliable cover + metadata),
-                # SMTC only if the Web API has nothing.
-                if can_spotify:
-                    np = _spotify()
-                if np is None and MEDIA_AVAILABLE:
-                    np = self.engine.read_media_now_playing()
-            else:
-                # Media mode → SMTC first, Web API as a fallback.
-                if MEDIA_AVAILABLE:
-                    np = self.engine.read_media_now_playing()
-                if np is None and can_spotify:
-                    np = _spotify()
+                np = self._np_last_spotify
 
             if np:
                 # Lock the cover art to the first one we get for this track so
@@ -288,13 +278,16 @@ class Api:
 
     def transport(self, action, cfg=None):
         self._apply(cfg)
+        # Control whatever the panel is actually showing: a Web-API (remote)
+        # track via the Web API, anything local via the SMTC session directly
+        # (works on the Spotify desktop app / browser without Premium).
+        src = (self.engine.now_playing or {}).get("source")
         try:
-            if action == "next":
-                self.engine.on_next()
-            elif action == "prev":
-                self.engine.on_prev()
-            elif action == "playpause":
-                self.engine.on_playpause()
+            if src == "spotify":
+                {"next": self.engine.sp_next, "prev": self.engine.sp_prev,
+                 "playpause": self.engine.sp_playpause}[action]()
+            else:
+                self.engine.transport_active(action)
         except Exception as exc:  # noqa: BLE001
             self._log(f"[!] transport {action}: {exc}")
         return {"ok": True}
@@ -559,6 +552,14 @@ def main():
                 "MediaHotKey.App")
         except Exception:  # noqa: BLE001
             pass
+        # WebView2 can stall for ~a minute on a cold start while it does
+        # background networking / SmartScreen checks. Turn those off so the
+        # window comes up promptly.
+        os.environ.setdefault(
+            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+            "--disable-background-networking --disable-component-update "
+            "--disable-features=msSmartScreenProtection,EdgeCollections,"
+            "msWebOOUI,msPdfOOUI")
 
     api = Api()
     index = os.path.join(_resource_dir(), "index.html")

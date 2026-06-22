@@ -561,6 +561,51 @@ class Engine:
             self._dbg("smtc", f"snapshot crashed: {exc}")
             return None
 
+    async def _control_active(self, action):
+        """Send a transport command to the same session the panel displays."""
+        if not MEDIA_AVAILABLE:
+            return False
+        try:
+            mgr = await MediaManager.request_async()
+        except Exception:  # noqa: BLE001
+            return False
+        session = self._pick_now_playing_session(mgr)
+        if session is None:
+            return False
+        for attempt in range(2):
+            try:
+                if action == "next":
+                    await session.try_skip_next_async()
+                elif action == "prev":
+                    await session.try_skip_previous_async()
+                elif action == "playpause":
+                    await session.try_toggle_play_pause_async()
+                return True
+            except Exception:  # noqa: BLE001
+                if attempt == 0:
+                    await asyncio.sleep(0.2)
+                    try:
+                        mgr = await MediaManager.request_async()
+                        session = self._pick_now_playing_session(mgr) or session
+                    except Exception:  # noqa: BLE001
+                        pass
+                else:
+                    return False
+        return False
+
+    def transport_active(self, action):
+        """Control the currently-displayed media session (Spotify desktop /
+        browser) via SMTC — no Premium or Web-API device needed."""
+        def go():
+            if not MEDIA_AVAILABLE:
+                self.notify_text("⚠️ media control needs winsdk "
+                                 "(pip install winsdk)", "error")
+                return
+            ok = asyncio.run(self._control_active(action))
+            if not ok:
+                self.log(f"[i] {action}: no controllable media session")
+        self._run_async(lambda: self._safe(go, f"transport {action}"))
+
     def read_spotify_now_playing(self):
         """Now-playing via the Spotify Web API (covers remote devices)."""
         try:
