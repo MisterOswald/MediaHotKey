@@ -28,6 +28,7 @@ DEFAULT_CONFIG = {
     },
     "discord": {
         "webhook_url": "",
+        "paused": False,                  # temporarily stop sending webhook posts
     },
     "hotkeys": {
         "next": "f9",

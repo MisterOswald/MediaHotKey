@@ -302,6 +302,15 @@ function wire() {
     }
   };
   $('#btn-restart').onclick = () => api().relaunch();
+
+  const dpt = $('#discord-pause-toggle');
+  dpt.classList.toggle('on', !!(cfg.discord && cfg.discord.paused));
+  $('#discord-pause-row').onclick = async () => {
+    cfg.discord.paused = !cfg.discord.paused;
+    dpt.classList.toggle('on', cfg.discord.paused);
+    await api().save_config(cfg);   // apply immediately
+    toast(cfg.discord.paused ? 'Webhooks paused' : 'Webhooks resumed');
+  };
 }
 
 function renderUpdate(info) {

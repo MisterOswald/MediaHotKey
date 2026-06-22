@@ -25,11 +25,14 @@ COLORS = {
 class Discord:
     """Thin wrapper around a single webhook URL."""
 
-    def __init__(self, webhook_url="", log=print):
+    def __init__(self, webhook_url="", log=print, paused=False):
         self.webhook_url = (webhook_url or "").strip()
         self.log = log
+        self.paused = paused
 
     def ready(self):
+        if self.paused:
+            return False
         url = self.webhook_url
         return bool(url) and url.startswith("http") and "XXXX" not in url
 

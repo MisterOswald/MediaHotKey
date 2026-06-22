@@ -193,6 +193,10 @@ class Api:
         self.engine.config = self.config
         self.engine.discord.webhook_url = (
             self.config.get("discord", {}).get("webhook_url", "") or "").strip()
+        new_paused = bool(self.config.get("discord", {}).get("paused", False))
+        if new_paused != self.engine.discord.paused:
+            self._log(f"[i] Discord webhooks {'paused' if new_paused else 'resumed'}.")
+        self.engine.discord.paused = new_paused
 
     def get_state(self):
         return {
