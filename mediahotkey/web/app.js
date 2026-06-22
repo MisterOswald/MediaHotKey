@@ -34,7 +34,7 @@ const DEMO = {
   config: {
     spotify: { client_id: '95352be1ea884c468c68e0c2c0103099', client_secret: 'demo-secret-value',
       redirect_uri: 'http://127.0.0.1:8888/callback' },
-    discord: { webhook_url: 'https://discord.com/api/webhooks/1515438913236373595/yhOkDxkoUMfe1Zb…' },
+    discord: { webhook_url: 'https://discord.com/api/webhooks/EXAMPLE/preview-only' },
     hotkeys: { next: 'f9', prev: 'shift+f9', playpause: 'ctrl+f9', add: 'alt+f9',
       like: 'ctrl+alt+f9', toggle_mode: 'ctrl+shift+f9' },
     settings: { start_mode: 'spotify', media_app_hint: 'brave', poll_interval: 5,
@@ -362,10 +362,20 @@ function renderUpdate(info) {
 // ---------- boot ----------
 async function boot() {
   let state;
-  try {
-    state = await api().get_state();
-  } catch (e) {
-    state = await MOCK.get_state();   // never blank the page if the call fails
+  if (bridgeReady()) {
+    // Real app: ONLY ever use the live config. Never fall back to demo data
+    // here — that would load the fake/truncated webhook and a later save would
+    // overwrite the real one.
+    try {
+      state = await api().get_state();
+    } catch (e) {
+      showError(e);
+      booted = false;                 // allow a retry
+      setTimeout(go, 800);
+      return;
+    }
+  } else {
+    state = await MOCK.get_state();   // browser preview only (no pywebview)
   }
   cfg = state.config || {};
   cfg.spotify = cfg.spotify || {}; cfg.discord = cfg.discord || {};
@@ -422,24 +432,23 @@ window.addEventListener('error', (e) => showError(e.error || e.message));
 // Wait until the pywebview bridge has actually attached its methods (not just
 // the empty placeholder object).
 //  - In a plain browser (no window.pywebview at all) → use demo data after ~1.5s.
-//  - Inside the app (window.pywebview exists) → keep waiting up to ~20s for the
-//    methods so we never boot the real app on demo data (which Save could then
-//    write over the real config).
+//  - Inside the app (window.pywebview exists) → wait as long as it takes for the
+//    bridge methods. We NEVER fall back to demo data in the app, because booting
+//    on demo data would load the fake webhook and a later save would overwrite
+//    the real config.
 function waitForBridge(cb) {
   if (bridgeReady()) return cb();
   let tries = 0;
   const timer = setInterval(() => {
     tries++;
     if (bridgeReady()) { clearInterval(timer); return cb(); }
-    const inApp = !!window.pywebview;
-    if (!inApp && tries > 7) { clearInterval(timer); return cb(); }   // browser preview
-    if (inApp && tries > 100) { clearInterval(timer); return cb(); }  // give up ~20s
+    if (!window.pywebview && tries > 7) { clearInterval(timer); return cb(); } // browser preview only
   }, 200);
   window.addEventListener('pywebviewready', () => {
     const t2 = setInterval(() => {
       if (bridgeReady()) { clearInterval(t2); clearInterval(timer); cb(); }
     }, 50);
-    setTimeout(() => clearInterval(t2), 5000);
+    setTimeout(() => clearInterval(t2), 10000);
   });
 }
 

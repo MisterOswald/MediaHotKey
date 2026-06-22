@@ -2,6 +2,15 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.6",
+        "notes": [
+            "Fixed the Discord webhook getting reset/truncated — the app no "
+            "longer falls back to demo data, so a saved webhook always sticks.",
+            "Faster startup: persistent WebView2 profile + hide-to-tray right "
+            "after load to cut the cold-start delay.",
+        ],
+    },
+    {
         "version": "1.0.5",
         "notes": [
             "Now-playing cover shows the full album art without cropping and "

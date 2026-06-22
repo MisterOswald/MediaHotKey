@@ -21,7 +21,7 @@ except Exception:  # noqa: BLE001
 
 from . import __version__, updater
 from .changelog import CHANGELOG
-from .config import load_config, save_config, config_path, token_cache_path
+from .config import load_config, save_config, config_path, token_cache_path, config_dir
 from .engine import Engine, KEYBOARD_AVAILABLE, MEDIA_AVAILABLE
 from .discord_notify import Discord
 
@@ -617,7 +617,8 @@ def main():
             if api._did_init:
                 return
             api._did_init = True
-        _apply_window_icon()
+        # Hide to tray FIRST so the window doesn't linger on screen while the
+        # rest of init runs.
         if start_hidden:
             api._ensure_tray()
             try:
@@ -625,6 +626,7 @@ def main():
             except Exception:  # noqa: BLE001
                 pass
             api._log("[i] started minimized to the system tray.")
+        _apply_window_icon()
         if settings.get("start_engine_on_launch"):
             try:
                 api.engine.start()
@@ -651,8 +653,27 @@ def main():
     # Force the modern Chromium (WebView2) backend on Windows so the UI's
     # modern JS runs; fall back gracefully on other platforms / old pywebview.
     gui = "edgechromium" if sys.platform.startswith("win") else None
+
+    # A persistent, fast local data folder lets WebView2 reuse its profile
+    # across launches instead of cold-initializing every time.
+    storage = os.path.join(
+        os.environ.get("LOCALAPPDATA") or config_dir(), "MediaHotKey", "webview")
     try:
-        webview.start(_fallback, gui=gui) if gui else webview.start(_fallback)
+        os.makedirs(storage, exist_ok=True)
+    except Exception:  # noqa: BLE001
+        storage = None
+    start_kwargs = {"private_mode": False}
+    if storage:
+        start_kwargs["storage_path"] = storage
+    if gui:
+        start_kwargs["gui"] = gui
+
+    try:
+        try:
+            webview.start(_fallback, **start_kwargs)
+        except TypeError:
+            # older pywebview without some kwargs
+            webview.start(_fallback, gui=gui) if gui else webview.start(_fallback)
     except Exception as exc:  # noqa: BLE001
         _message_box(
             "MediaHotKey couldn't open its window.\n\n"
