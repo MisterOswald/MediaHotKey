@@ -145,6 +145,19 @@ input.field::placeholder { color: #c7b594; }
 .toggle.on { background: var(--sage); }
 .toggle.on .knob { left: 22.5px; }
 .opt-row span { font: 500 14.5px var(--ui); color: var(--body); }
+.patch { margin-top: 16px; background: var(--field); border: 1px solid var(--field-border);
+  border-radius: 10px; padding: 4px 14px; }
+.patch summary { cursor: pointer; font: 600 14px var(--ui); color: var(--body);
+  padding: 8px 0; list-style: none; user-select: none; }
+.patch summary::-webkit-details-marker { display: none; }
+.patch summary::before { content: '▸ '; color: var(--terra); }
+.patch[open] summary::before { content: '▾ '; }
+.patch-ver { padding: 6px 0 10px; border-top: 1px solid #efe3c8; }
+.patch-ver:first-child { border-top: 0; }
+.patch-h { font: 700 13.5px var(--mono); color: var(--terra); margin-bottom: 4px; }
+.patch-ver ul { margin: 0; padding-left: 18px; }
+.patch-ver li { font: 400 13px var(--ui); color: var(--body); line-height: 1.5; margin: 2px 0; }
+
 .cfgpath { font: 400 12.5px var(--mono); color: var(--fainter); margin-top: 26px;
   word-break: break-all; }
 
@@ -165,7 +178,8 @@ input.field::placeholder { color: #c7b594; }
 .mascot > *:not(.art) { flex: none; }   /* keep meta/progress/transport full size */
 .mascot .np { font: 700 11px var(--mono); letter-spacing: .16em; color: #C0925A; }
 .art { width: 100%; flex: 1 1 auto; min-height: 150px; border-radius: 12px; border: 2px dashed #E0C99A;
-  background-size: cover; background-position: center; cursor: pointer; position: relative;
+  background-size: contain; background-repeat: no-repeat; background-position: center;
+  cursor: pointer; position: relative;
   display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .art.filled { border-style: solid; border-color: var(--panel-border); }
 .art .hint { font: 500 13px var(--ui); color: #b7a384; text-align: center; padding: 12px; }

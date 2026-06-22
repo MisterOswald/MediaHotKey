@@ -20,6 +20,7 @@ except Exception:  # noqa: BLE001
     webview = None
 
 from . import __version__, updater
+from .changelog import CHANGELOG
 from .config import load_config, save_config, config_path, token_cache_path
 from .engine import Engine, KEYBOARD_AVAILABLE, MEDIA_AVAILABLE
 from .discord_notify import Discord
@@ -238,6 +239,9 @@ class Api:
             return {"ok": True}
         return {"ok": False, "msg": "Couldn't relaunch automatically — please "
                                     "reopen MediaHotKey."}
+
+    def get_changelog(self):
+        return CHANGELOG
 
     def _launch_update_check(self):
         res = self.check_update()

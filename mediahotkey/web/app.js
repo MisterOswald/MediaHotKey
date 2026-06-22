@@ -68,6 +68,11 @@ const MOCK = {
   test_discord: async () => ({ ok: true, msg: 'Test message sent. Check your channel.' }),
   record_hotkey: async () => '', open_url: () => {}, choose_mascot: async () => '',
   clear_log: async () => { DEMO.logs = []; return { ok: true }; },
+  get_changelog: async () => [
+    { version: '1.0.5', notes: ['Now-playing cover shows the full art, no cropping.',
+      'Added this patch-notes dropdown.'] },
+    { version: '1.0.4', notes: ['Add to playlist / Like buttons in now-playing.'] },
+  ],
   minimize: () => {}, toggle_maximize: () => {}, close: () => {},
 };
 // The pywebview bridge creates window.pywebview.api as an empty object first,
@@ -315,6 +320,29 @@ function wire() {
   };
 }
 
+async function loadPatchNotes() {
+  let data = [];
+  try { data = await api().get_changelog(); } catch (e) { /* ignore */ }
+  const host = $('#patch-list');
+  if (!host) return;
+  host.innerHTML = '';
+  (data || []).forEach((v) => {
+    const block = document.createElement('div');
+    block.className = 'patch-ver';
+    const h = document.createElement('div');
+    h.className = 'patch-h';
+    h.textContent = 'v' + v.version + (v.date ? ' · ' + v.date : '');
+    const ul = document.createElement('ul');
+    (v.notes || []).forEach((n) => {
+      const li = document.createElement('li');
+      li.textContent = n;
+      ul.appendChild(li);
+    });
+    block.append(h, ul);
+    host.appendChild(block);
+  });
+}
+
 function renderUpdate(info) {
   if (!info || updateBusy) return;
   if (info.version) $('#upd-version').textContent = info.version;
@@ -348,7 +376,7 @@ async function boot() {
   $('#upd-version').textContent = state.version || '';
 
   renderTabs(); renderPanels(); renderHotkeys(); renderOpts(); renderSeg();
-  fillFields(); bindFields(); wire();
+  fillFields(); bindFields(); wire(); loadPatchNotes();
   renderCaps(state.caps || {});
   renderRunning(state.running, state.mode);
   setArt(null);
