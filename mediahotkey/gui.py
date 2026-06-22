@@ -373,22 +373,37 @@ class Api:
     def on_closing(self):
         """Window X pressed. Hide to the tray and keep running instead of
         quitting (so the hotkeys stay alive). Returning False cancels the
-        close in pywebview. Without tray support, quit normally so the app
-        can't get stranded with no window."""
-        if self._allow_close:
-            return True
-        if not _TRAY:
-            self._quit_app()
-            return True
-        self._hide_to_tray()
-        return False
+        close in pywebview. Without tray support, quit normally.
+
+        This is called by WinForms via pythonnet, so it MUST NOT raise — an
+        uncaught exception here surfaces as a fatal .NET error dialog. Any
+        failure falls through to letting the window close."""
+        try:
+            if self._allow_close:
+                return True
+            if not _TRAY:
+                self._allow_close = True
+                self._np_stop.set()
+                try:
+                    if self.engine.running:
+                        self.engine.stop()
+                except Exception:  # noqa: BLE001
+                    pass
+                return True            # let the in-progress close proceed
+            self._hide_to_tray()
+            return False
+        except Exception:  # noqa: BLE001
+            return True                # never crash the app on close
 
     def _hide_to_tray(self):
         try:
             self.window.hide()
         except Exception:  # noqa: BLE001
             pass
-        self._ensure_tray()
+        try:
+            self._ensure_tray()
+        except Exception:  # noqa: BLE001
+            pass
         self._log("[i] minimized to tray — hotkeys still active. "
                   "Use the tray icon to reopen or quit.")
 
@@ -410,12 +425,19 @@ class Api:
                 icon_img = None
         if icon_img is None:
             icon_img = Image.new("RGB", (64, 64), "#CC7E4F")
+
+        def _safe(fn):
+            def handler(icon, item):
+                try:
+                    fn()
+                except Exception:  # noqa: BLE001
+                    pass
+            return handler
+
         menu = pystray.Menu(
-            pystray.MenuItem("Open MediaHotKey",
-                             lambda icon, item: self.show_window(), default=True),
-            pystray.MenuItem("Start / Stop hotkeys",
-                             lambda icon, item: self.toggle_engine(None)),
-            pystray.MenuItem("Quit", lambda icon, item: self._quit_app()),
+            pystray.MenuItem("Open MediaHotKey", _safe(self.show_window), default=True),
+            pystray.MenuItem("Start / Stop hotkeys", _safe(lambda: self.toggle_engine(None))),
+            pystray.MenuItem("Quit", _safe(self._quit_app)),
         )
         self._tray = pystray.Icon("MediaHotKey", icon_img, "MediaHotKey", menu)
         threading.Thread(target=self._tray.run, daemon=True).start()

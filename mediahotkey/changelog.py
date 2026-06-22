@@ -2,6 +2,13 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.7",
+        "notes": [
+            "Fixed a crash dialog on close — the window-close and tray handlers "
+            "can no longer throw an unhandled .NET exception.",
+        ],
+    },
+    {
         "version": "1.0.6",
         "notes": [
             "Fixed the Discord webhook getting reset/truncated — the app no "
