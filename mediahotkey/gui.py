@@ -19,7 +19,7 @@ try:
 except Exception:  # noqa: BLE001
     webview = None
 
-from . import __version__
+from . import __version__, updater
 from .config import load_config, save_config, config_path, token_cache_path
 from .engine import Engine, KEYBOARD_AVAILABLE, MEDIA_AVAILABLE
 from .discord_notify import Discord
@@ -81,6 +81,7 @@ class Api:
         self._np_misses = 0
         self._np_art_by_track = {}   # {"title|artist": art_url} — stable cover
         self._np_last_sig = None
+        self._update_info = {}       # last update-check result (for the UI)
         caps = Engine.capabilities()
         self._log(f"[dbg:init] keyboard={caps['keyboard']} spotipy={caps['spotipy']} "
                   f"media/SMTC={caps['media']} token_cache="
@@ -212,7 +213,47 @@ class Api:
             "caps": Engine.capabilities(),
             "now_playing": self.engine.now_playing,
             "logs": logs,
+            "update": self._update_info,
         }
+
+    # -- updates ----------------------------------------------------------
+    def check_update(self):
+        res = updater.check()
+        res["version"] = __version__
+        res["frozen"] = updater.is_frozen()
+        self._update_info = res
+        if res.get("error"):
+            self._log(f"[update] check failed: {res['error']}")
+        elif res.get("available"):
+            self._log("[update] a new version is available on GitHub.")
+        else:
+            self._log("[update] you're up to date.")
+        return res
+
+    def apply_update(self):
+        ok, msg = updater.apply_update(progress=lambda m: self._log(f"[update] {m}"))
+        self._log(f"[update] {msg}")
+        if ok:
+            self._update_info = {"available": False, "installed": True,
+                                 "version": __version__}
+        return {"ok": ok, "msg": msg}
+
+    def relaunch(self):
+        if updater.relaunch():
+            self._quit_app()
+            return {"ok": True}
+        return {"ok": False, "msg": "Couldn't relaunch automatically — please "
+                                    "reopen MediaHotKey."}
+
+    def _launch_update_check(self):
+        res = self.check_update()
+        if res.get("available") and self.config["settings"].get("auto_install_updates"):
+            self._log("[update] auto-installing…")
+            ok, _ = updater.apply_update(progress=lambda m: self._log(f"[update] {m}"))
+            if ok:
+                self._log("[update] restarting to apply…")
+                if updater.relaunch():
+                    self._quit_app()
 
     def save_config(self, cfg):
         self._apply(cfg)
@@ -559,6 +600,8 @@ def main():
                 api.engine.start()
             except Exception as exc:  # noqa: BLE001
                 api._log(f"[!] {exc}")
+        if settings.get("update_check_on_launch"):
+            threading.Thread(target=api._launch_update_check, daemon=True).start()
 
     # Force the modern Chromium (WebView2) backend on Windows so the UI's
     # modern JS runs; fall back gracefully on other platforms / old pywebview.

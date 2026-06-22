@@ -45,6 +45,8 @@ DEFAULT_CONFIG = {
         "media_app_hint": "brave",        # prefer media session matching this
         "start_engine_on_launch": False,  # auto-start hotkeys when UI opens
         "start_minimized": False,         # launch hidden to the system tray
+        "update_check_on_launch": True,   # check GitHub for updates at startup
+        "auto_install_updates": False,    # download+install updates automatically
     },
     "mascot": {
         "image": "",                      # user-chosen now-playing panel art (data URL)

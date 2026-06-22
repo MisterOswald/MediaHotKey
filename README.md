@@ -122,6 +122,21 @@ To regenerate the icon after tweaking it: `python assets/make_icon.py`.
 
 ---
 
+## Updating
+
+MediaHotKey can update itself from this GitHub repo. In **General → Updates**:
+
+- **Check for updates** — asks GitHub whether a newer commit exists.
+- **Update now** — downloads the latest `main` and overwrites the app files in
+  place (your settings in `%APPDATA%\MediaHotKey` are never touched), then offers
+  **Restart to apply**.
+- Toggles: *Check for updates on launch* (on by default) and *Automatically
+  install updates on launch*.
+
+Updating works for **source installs** (running the `.py`/`.pyw`). The frozen
+`.exe` can't rewrite its own running binary — rebuild it with `build_exe.bat` to
+update.
+
 ## Command-line / headless
 
 Already configured and just want it running with no window?

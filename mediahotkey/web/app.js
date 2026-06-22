@@ -14,6 +14,8 @@ const OPTS = [
   ['announce_pause_resume', 'Also post when you pause / resume the same track'],
   ['start_engine_on_launch', 'Start hotkeys automatically when the app opens'],
   ['start_minimized', 'Launch minimized to the system tray'],
+  ['update_check_on_launch', 'Check GitHub for updates on launch'],
+  ['auto_install_updates', 'Automatically install updates on launch'],
 ];
 
 let cfg = null;          // working copy of the config
@@ -21,6 +23,7 @@ let activeTab = 'Spotify';
 let running = false;
 let mascotImage = '';    // user-chosen art (data URL)
 let lastArt = '';        // currently shown art url
+let updateBusy = false;  // an update install is in progress
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -281,6 +284,40 @@ function wire() {
   $('#tp-prev').onclick = () => api().transport('prev', cfg);
   $('#tp-next').onclick = () => api().transport('next', cfg);
   $('#tp-play').onclick = () => api().transport('playpause', cfg);
+
+  $('#btn-check-update').onclick = async () => {
+    $('#upd-status').textContent = 'checking…';
+    renderUpdate(await api().check_update());
+  };
+  $('#btn-do-update').onclick = async () => {
+    updateBusy = true;
+    $('#upd-status').textContent = 'downloading & installing…';
+    const r = await api().apply_update();
+    updateBusy = false;
+    if (r.ok) {
+      $('#upd-status').textContent = 'installed ✓ — restart to apply';
+      $('#btn-restart').style.display = '';
+    } else {
+      $('#upd-status').textContent = r.msg || 'update failed';
+    }
+  };
+  $('#btn-restart').onclick = () => api().relaunch();
+}
+
+function renderUpdate(info) {
+  if (!info || updateBusy) return;
+  if (info.version) $('#upd-version').textContent = info.version;
+  const st = $('#upd-status'), restart = $('#btn-restart');
+  if (info.installed) {
+    st.textContent = 'installed ✓ — restart to apply';
+    restart.style.display = '';
+  } else if (info.available) {
+    st.textContent = 'a new version is available — click Update now';
+  } else if (info.error) {
+    st.textContent = "couldn't check (you can still click Update now)";
+  } else if (info.remote || info.current || info.first_run !== undefined) {
+    st.textContent = 'up to date';
+  }
 }
 
 // ---------- boot ----------
@@ -297,6 +334,7 @@ async function boot() {
   if (!cfg.mascot) cfg.mascot = {};
   mascotImage = cfg.mascot.image || '';
   $('#cfgpath').textContent = 'Config file: ' + (state.config_path || '');
+  $('#upd-version').textContent = state.version || '';
 
   renderTabs(); renderPanels(); renderHotkeys(); renderOpts(); renderSeg();
   fillFields(); bindFields(); wire();
@@ -315,6 +353,7 @@ async function poll() {
     renderCaps(p.caps);
     renderNowPlaying(p.now_playing);
     renderLog(p.logs);
+    if (p.update) renderUpdate(p.update);
   } catch (e) { /* window closing */ }
 }
 
