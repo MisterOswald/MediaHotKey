@@ -2,6 +2,15 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.21",
+        "notes": [
+            "Brought back the separate floating Mini player window (the clean "
+            "one), and fixed the freeze: it's now created on the GUI thread (a "
+            "window made off-thread looked alive but didn't respond) and fed via "
+            "a lightweight now-playing channel.",
+        ],
+    },
+    {
         "version": "1.0.20",
         "notes": [
             "Fixed the Mini player freezing the app — it's now a compact "

@@ -25,7 +25,6 @@ let mascotImage = '';    // user-chosen art (data URL)
 let lastArt = '';        // currently shown art url
 let updateBusy = false;  // an update install is in progress
 let volDragging = false; // user is dragging the volume slider
-let miniMode = false;    // compact always-on-top overlay mode
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -70,7 +69,9 @@ const MOCK = {
   set_volume: async () => ({ ok: true }),
   add_to_playlist: async () => ({ ok: true }),
   like: async () => ({ ok: true }),
-  set_mini: async () => ({ ok: true }),
+  poll_np: async () => ({ now_playing: DEMO.now_playing }),
+  open_mini: async () => ({ ok: true }),
+  close_mini: async () => ({ ok: true }),
   test_spotify: async () => ({ ok: true, msg: 'Connected to Spotify (nothing playing right now)' }),
   test_discord: async () => ({ ok: true, msg: 'Test message sent. Check your channel.' }),
   record_hotkey: async () => '', open_url: () => {}, choose_mascot: async () => '',
@@ -316,10 +317,8 @@ function wire() {
     setTimeout(() => { volDragging = false; }, 400);
   };
   $('#btn-mini').onclick = async () => {
-    miniMode = !miniMode;
-    document.body.classList.toggle('mini', miniMode);
-    $('#btn-mini').textContent = miniMode ? '🗗 Exit mini player' : '🗗 Mini player';
-    await api().set_mini(miniMode);
+    const r = await api().open_mini();
+    toast(r && r.ok === false ? (r.msg || 'Mini player failed') : 'Mini player opened');
   };
 
   $('#btn-check-update').onclick = async () => {
