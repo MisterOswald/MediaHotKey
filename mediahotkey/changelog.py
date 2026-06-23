@@ -2,6 +2,15 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.16",
+        "notes": [
+            "Volume +/- now controls browser / app media properly (per-app "
+            "volume via Windows Core Audio), instead of only Spotify or the "
+            "whole system. Set the 'Media app hint' (e.g. brave) to target your "
+            "browser.",
+        ],
+    },
+    {
         "version": "1.0.15",
         "notes": [
             "Fixed the Mini player hanging when opened a second time — it now "

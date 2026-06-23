@@ -20,6 +20,8 @@ pyinstaller ^
   --add-data "assets\icon.ico;assets" ^
   --collect-all webview ^
   --collect-all winsdk ^
+  --collect-all pycaw ^
+  --collect-all comtypes ^
   --exclude-module tkinter ^
   --exclude-module _tkinter ^
   --exclude-module test ^

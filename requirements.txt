@@ -12,6 +12,10 @@ pythonnet>=3.0.0; sys_platform == "win32"
 # Safe to skip on macOS/Linux — the app detects it and disables media mode.
 winsdk>=1.0.0b10; sys_platform == "win32"
 
+# Windows-only per-application volume control (browser/app volume).
+pycaw>=20230407; sys_platform == "win32"
+comtypes>=1.2.0; sys_platform == "win32"
+
 # Optional: minimize-to-tray support
 pystray>=0.19.0
 Pillow>=9.0.0

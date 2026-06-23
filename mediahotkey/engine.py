@@ -63,6 +63,17 @@ except Exception:  # noqa: BLE001
     MediaManager = None
     MEDIA_AVAILABLE = False
 
+# Per-application volume (Windows Core Audio) — lets us control the browser's
+# volume specifically instead of system-wide.
+try:
+    import comtypes
+    from pycaw.pycaw import (AudioUtilities, ISimpleAudioVolume,
+                             IAudioMeterInformation)
+    PYCAW_AVAILABLE = True
+except Exception:  # noqa: BLE001
+    comtypes = None
+    PYCAW_AVAILABLE = False
+
 SCOPE = (
     "user-modify-playback-state user-read-playback-state "
     "user-library-modify playlist-modify-public playlist-modify-private"
@@ -356,13 +367,66 @@ class Engine:
             self.notify_track("💚 Liked", track, "like", footer="Saved to Liked Songs")
         self._run_async(lambda: self._safe(save, "like song"))
 
+    def _pycaw_volume(self, delta, hint):
+        """Adjust per-application volume via Windows Core Audio. Targets the
+        app whose process name contains `hint` (e.g. 'brave'); if none match,
+        targets whatever session is actually producing sound. Returns True if
+        it changed something."""
+        if not PYCAW_AVAILABLE:
+            return False
+        try:
+            comtypes.CoInitialize()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            sessions = AudioUtilities.GetAllSessions()
+            by_hint, audible = [], []
+            for s in sessions:
+                try:
+                    vol = s._ctl.QueryInterface(ISimpleAudioVolume)
+                except Exception:  # noqa: BLE001
+                    continue
+                name = ""
+                try:
+                    if s.Process:
+                        name = (s.Process.name() or "").lower()
+                except Exception:  # noqa: BLE001
+                    name = ""
+                if hint and hint in name:
+                    by_hint.append(vol)
+                try:
+                    meter = s._ctl.QueryInterface(IAudioMeterInformation)
+                    if meter.GetPeakValue() > 0.0001:
+                        audible.append(vol)
+                except Exception:  # noqa: BLE001
+                    pass
+            targets = by_hint or audible
+            if not targets:
+                return False
+            step = delta / 100.0
+            for vol in targets:
+                cur = vol.GetMasterVolume()
+                vol.SetMasterVolume(max(0.0, min(1.0, cur + step)), None)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"[i] volume (pycaw): {exc}")
+            return False
+        finally:
+            try:
+                comtypes.CoUninitialize()
+            except Exception:  # noqa: BLE001
+                pass
+
     def volume(self, delta):
-        """Adjust volume by `delta` percent. Prefers the Spotify Web API (when
-        authorized, with an active device + Premium); otherwise nudges the
-        Windows system volume via the media keys."""
+        """Adjust volume by `delta` percent, controlling whatever's playing:
+        the Spotify Web API for a remote Spotify track, otherwise the specific
+        app's volume (browser / desktop player) via Core Audio, falling back to
+        the system volume media keys."""
         def go():
-            # Spotify Web API volume (no keystroke injection).
-            if (SPOTIPY_AVAILABLE and self.config["spotify"].get("client_id")
+            src = (self.now_playing or {}).get("source")
+            # 1) Remote Spotify (Web API) playback — set the device volume.
+            if (src == "spotify" and SPOTIPY_AVAILABLE
+                    and self.config["spotify"].get("client_id")
                     and os.path.exists(token_cache_path())):
                 try:
                     sp = self._ensure_spotify()
@@ -376,16 +440,20 @@ class Engine:
                         return
                 except Exception:  # noqa: BLE001
                     pass
-            # Fallback: system master volume via the volume media keys.
+            # 2) Per-app volume (browser / local player).
+            hint = (self.config["settings"].get("media_app_hint", "") or "").lower()
+            if self._pycaw_volume(delta, hint):
+                self.log(f"[ok] app volume {'+' if delta > 0 else ''}{delta}%")
+                return
+            # 3) Fallback: system master volume via the media keys.
             if KEYBOARD_AVAILABLE:
                 key = "volume up" if delta > 0 else "volume down"
-                steps = max(1, abs(int(delta)) // 4)
-                for _ in range(steps):
+                for _ in range(max(1, abs(int(delta)) // 4)):
                     try:
                         keyboard.send(key)
                     except Exception:  # noqa: BLE001
                         break
-                self.log(f"[ok] system {key} x{steps}")
+                self.log(f"[ok] system {key}")
             else:
                 self.notify_text("⚠️ volume: no control method available", "error")
         self._run_async(lambda: self._safe(go, "volume"))
