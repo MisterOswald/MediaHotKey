@@ -70,7 +70,6 @@ class Api:
         self.logs = collections.deque(maxlen=400)
         self._log_lock = threading.Lock()
         self.window = None
-        self.mini_window = None
         self._allow_close = False
         self._tray = None
         self.engine = Engine(self.config, log=self._log,
@@ -339,35 +338,44 @@ class Api:
         self.engine.set_volume(percent)
         return {"ok": True}
 
-    # -- mini player (always-on-top overlay window) -----------------------
-    def open_mini(self):
-        # Create the mini window once, then just show it on later opens —
-        # destroying + recreating a pywebview window (especially from inside a
-        # JS-API call) can deadlock the GUI thread. Run off the GUI thread too.
-        def go():
-            try:
-                if self.mini_window is None:
-                    mini_index = os.path.join(_resource_dir(), "mini.html")
-                    self.mini_window = webview.create_window(
-                        "MediaHotKey Mini", url=mini_index, js_api=self,
-                        width=300, height=430, resizable=False, frameless=True,
-                        on_top=True, background_color="#F6EFE1")
-                else:
-                    self.mini_window.show()
-            except Exception as exc:  # noqa: BLE001
-                self._log(f"[!] mini player: {exc}")
-        threading.Thread(target=go, daemon=True).start()
+    # -- mini player (compact always-on-top mode of the main window) ------
+    def set_mini(self, on):
+        """Shrink the window to a compact overlay and pin it on top (or
+        restore). Uses the single main window — a second pywebview window
+        sharing the JS bridge deadlocks the Edge backend."""
+        try:
+            if on:
+                self.window.resize(330, 500)
+                self._set_topmost(True)
+            else:
+                self._set_topmost(False)
+                self.window.resize(1120, 860)
+        except Exception as exc:  # noqa: BLE001
+            self._log(f"[!] mini: {exc}")
         return {"ok": True}
 
-    def close_mini(self):
-        # Hide (don't destroy) so it can be reopened cheaply and safely.
-        w = self.mini_window
-        if w is not None:
-            try:
-                w.hide()
-            except Exception:  # noqa: BLE001
-                pass
-        return {"ok": True}
+    @staticmethod
+    def _set_topmost(on):
+        if not sys.platform.startswith("win"):
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+            u = ctypes.windll.user32
+            u.FindWindowW.restype = wintypes.HWND
+            u.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+            u.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int,
+                                       ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                       wintypes.UINT]
+            hwnd = u.FindWindowW(None, f"MediaHotKey {__version__}")
+            if not hwnd:
+                return
+            HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
+            SWP_NOMOVE, SWP_NOSIZE = 0x0002, 0x0001
+            u.SetWindowPos(hwnd, HWND_TOPMOST if on else HWND_NOTOPMOST,
+                           0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
+        except Exception:  # noqa: BLE001
+            pass
 
     # -- tests ------------------------------------------------------------
     def test_spotify(self, cfg=None):
@@ -556,12 +564,6 @@ class Api:
                 self._tray.stop()
             except Exception:  # noqa: BLE001
                 pass
-        if self.mini_window is not None:
-            try:
-                self.mini_window.destroy()
-            except Exception:  # noqa: BLE001
-                pass
-            self.mini_window = None
         try:
             self.window.destroy()
         except Exception:  # noqa: BLE001

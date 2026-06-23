@@ -43,6 +43,11 @@ body {
 
 .app { display: flex; flex-direction: column; height: 100vh; background: var(--paper); }
 
+/* Compact "mini player" mode — shows only the now-playing panel, full window. */
+body.mini .header, body.mini .tabbar, body.mini .footer, body.mini .content { display: none !important; }
+body.mini .body { grid-template-columns: 1fr; padding: 8px; gap: 0; }
+body.mini .mascot { border-radius: 12px; }
+
 /* ---- header ---- */
 .header { display: flex; align-items: center; justify-content: space-between;
   padding: 22px 30px 6px; flex: none; }

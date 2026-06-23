@@ -2,6 +2,15 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.20",
+        "notes": [
+            "Fixed the Mini player freezing the app — it's now a compact "
+            "always-on-top mode of the main window (toggle it from the "
+            "now-playing panel) instead of a second window, which avoided the "
+            "deadlock. Still floats over borderless games.",
+        ],
+    },
+    {
         "version": "1.0.19",
         "notes": [
             "Spotify volume now syncs both ways: the app uses Spotify's own "
