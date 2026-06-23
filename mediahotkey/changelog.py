@@ -2,6 +2,13 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.15",
+        "notes": [
+            "Fixed the Mini player hanging when opened a second time — it now "
+            "stays alive hidden and just re-shows instead of being recreated.",
+        ],
+    },
+    {
         "version": "1.0.14",
         "notes": [
             "Fixed the '404 / failed to remove temp directory' error after an "

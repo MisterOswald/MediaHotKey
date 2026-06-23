@@ -319,37 +319,30 @@ class Api:
 
     # -- mini player (always-on-top overlay window) -----------------------
     def open_mini(self):
-        if self.mini_window is not None:
+        # Create the mini window once, then just show it on later opens —
+        # destroying + recreating a pywebview window (especially from inside a
+        # JS-API call) can deadlock the GUI thread. Run off the GUI thread too.
+        def go():
             try:
-                self.mini_window.show()
-            except Exception:  # noqa: BLE001
-                pass
-            return {"ok": True}
-        try:
-            mini_index = os.path.join(_resource_dir(), "mini.html")
-            self.mini_window = webview.create_window(
-                "MediaHotKey Mini", url=mini_index, js_api=self,
-                width=300, height=430, resizable=False, frameless=True,
-                on_top=True, background_color="#F6EFE1")
-
-            def _closed():
-                self.mini_window = None
-            try:
-                self.mini_window.events.closed += lambda *a: _closed()
-            except Exception:  # noqa: BLE001
-                pass
-        except Exception as exc:  # noqa: BLE001
-            self._log(f"[!] mini player: {exc}")
-            self.mini_window = None
-            return {"ok": False, "msg": str(exc)}
+                if self.mini_window is None:
+                    mini_index = os.path.join(_resource_dir(), "mini.html")
+                    self.mini_window = webview.create_window(
+                        "MediaHotKey Mini", url=mini_index, js_api=self,
+                        width=300, height=430, resizable=False, frameless=True,
+                        on_top=True, background_color="#F6EFE1")
+                else:
+                    self.mini_window.show()
+            except Exception as exc:  # noqa: BLE001
+                self._log(f"[!] mini player: {exc}")
+        threading.Thread(target=go, daemon=True).start()
         return {"ok": True}
 
     def close_mini(self):
+        # Hide (don't destroy) so it can be reopened cheaply and safely.
         w = self.mini_window
-        self.mini_window = None
         if w is not None:
             try:
-                w.destroy()
+                w.hide()
             except Exception:  # noqa: BLE001
                 pass
         return {"ok": True}
@@ -541,6 +534,12 @@ class Api:
                 self._tray.stop()
             except Exception:  # noqa: BLE001
                 pass
+        if self.mini_window is not None:
+            try:
+                self.mini_window.destroy()
+            except Exception:  # noqa: BLE001
+                pass
+            self.mini_window = None
         try:
             self.window.destroy()
         except Exception:  # noqa: BLE001
