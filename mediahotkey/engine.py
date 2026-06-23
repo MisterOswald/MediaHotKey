@@ -63,16 +63,25 @@ except Exception:  # noqa: BLE001
     MediaManager = None
     MEDIA_AVAILABLE = False
 
-# Per-application volume (Windows Core Audio) — lets us control the browser's
-# volume specifically instead of system-wide.
-try:
-    import comtypes
-    from pycaw.pycaw import (AudioUtilities, ISimpleAudioVolume,
-                             IAudioMeterInformation)
-    PYCAW_AVAILABLE = True
-except Exception:  # noqa: BLE001
-    comtypes = None
-    PYCAW_AVAILABLE = False
+# Per-application volume (Windows Core Audio). pycaw/comtypes are SLOW to
+# import (comtypes generates COM wrappers), so load them lazily on first use
+# instead of at startup — importing them eagerly noticeably delayed launch.
+_PYCAW = None  # None = not tried yet; {} = tried and unavailable; dict = loaded
+
+
+def _pycaw():
+    global _PYCAW
+    if _PYCAW is None:
+        try:
+            import comtypes
+            from pycaw.pycaw import (AudioUtilities, ISimpleAudioVolume,
+                                     IAudioMeterInformation)
+            _PYCAW = {"comtypes": comtypes, "AudioUtilities": AudioUtilities,
+                      "ISimpleAudioVolume": ISimpleAudioVolume,
+                      "IAudioMeterInformation": IAudioMeterInformation}
+        except Exception:  # noqa: BLE001
+            _PYCAW = {}
+    return _PYCAW or None
 
 SCOPE = (
     "user-modify-playback-state user-read-playback-state "
@@ -371,8 +380,13 @@ class Engine:
         """get/add/set per-app volume via Core Audio. Targets the process whose
         name contains `hint`, else whatever session is making sound. Returns the
         resulting level as 0..1 (or None if nothing to control)."""
-        if not PYCAW_AVAILABLE:
+        p = _pycaw()
+        if not p:
             return None
+        comtypes = p["comtypes"]
+        AudioUtilities = p["AudioUtilities"]
+        ISimpleAudioVolume = p["ISimpleAudioVolume"]
+        IAudioMeterInformation = p["IAudioMeterInformation"]
         try:
             comtypes.CoInitialize()
         except Exception:  # noqa: BLE001

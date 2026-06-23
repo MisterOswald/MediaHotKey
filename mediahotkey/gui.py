@@ -85,6 +85,8 @@ class Api:
         self._np_misses = 0
         self._np_art_by_track = {}   # {"title|artist": art_url} — stable cover
         self._np_last_sig = None
+        self._np_last_vol = None
+        self._np_last_vol_t = 0.0
         self._np_thread = None
         self._update_info = {}       # last update-check result (for the UI)
         caps = Engine.capabilities()
@@ -145,12 +147,16 @@ class Api:
                 # across the throttled Spotify reads — don't overwrite it here.
                 np.setdefault("fetched_at", int(now * 1000))
                 # Volume level for the panel: Spotify reader already includes it;
-                # for local/app sources read the per-app volume via Core Audio.
+                # for local/app sources read the per-app volume via Core Audio,
+                # throttled (pycaw enumeration is relatively costly).
                 if np.get("source") != "spotify" and np.get("volume") is None:
-                    try:
-                        np["volume"] = self.engine.read_app_volume()
-                    except Exception:  # noqa: BLE001
-                        np["volume"] = None
+                    if now - self._np_last_vol_t >= 2.5:
+                        self._np_last_vol_t = now
+                        try:
+                            self._np_last_vol = self.engine.read_app_volume()
+                        except Exception:  # noqa: BLE001
+                            self._np_last_vol = None
+                    np["volume"] = self._np_last_vol
                 self.engine.now_playing = np
                 self._np_misses = 0
 

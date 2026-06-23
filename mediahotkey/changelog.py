@@ -2,6 +2,14 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.18",
+        "notes": [
+            "Fixed the slow startup introduced with per-app volume — the audio "
+            "library (pycaw/comtypes) now loads lazily on first use instead of "
+            "at launch, and the volume level is read less often.",
+        ],
+    },
+    {
         "version": "1.0.17",
         "notes": [
             "The volume control now shows the level: a live volume slider with a "
