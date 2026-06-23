@@ -212,6 +212,16 @@ input.field::placeholder { color: #c7b594; }
 .np-act.like { font-size: 15px; padding: 9px 13px; }
 .np-act.like:hover { color: var(--like, #E91E63); }
 
+.vol { display: flex; gap: 10px; justify-content: center; }
+.vbtn { flex: 1; padding: 8px 0; border-radius: 10px; border: 1px solid var(--field-border);
+  background: #FFFDF8; color: #8a7558; font: 600 14px var(--ui); cursor: pointer; }
+.vbtn:hover { background: #F2E9D6; }
+.vbtn:active { transform: translateY(1px); }
+.np-mini { width: 100%; padding: 9px 0; border: 1px solid var(--field-border); border-radius: 10px;
+  background: #F2E9D6; color: #8a7558; font: 600 13.5px var(--ui); cursor: pointer; }
+.np-mini:hover { background: #eaddc0; }
+.np-mini:active { transform: translateY(1px); }
+
 /* footer */
 .footer { display: flex; align-items: center; justify-content: space-between;
   padding: 18px 30px; border-top: 1px solid var(--panel-border); background: var(--footer); flex: none; }

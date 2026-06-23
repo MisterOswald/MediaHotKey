@@ -64,6 +64,11 @@ const MOCK = {
   save_config: async () => ({ ok: true }),
   toggle_engine: async () => { DEMO.running = !DEMO.running; return { ok: true }; },
   transport: async () => ({ ok: true }),
+  volume: async () => ({ ok: true }),
+  add_to_playlist: async () => ({ ok: true }),
+  like: async () => ({ ok: true }),
+  open_mini: async () => ({ ok: true }),
+  close_mini: async () => ({ ok: true }),
   test_spotify: async () => ({ ok: true, msg: 'Connected to Spotify (nothing playing right now)' }),
   test_discord: async () => ({ ok: true, msg: 'Test message sent. Check your channel.' }),
   record_hotkey: async () => '', open_url: () => {}, choose_mascot: async () => '',
@@ -292,6 +297,9 @@ function wire() {
   $('#tp-play').onclick = () => api().transport('playpause', cfg);
   $('#np-add').onclick = () => { api().add_to_playlist(); toast('Adding to playlist…'); };
   $('#np-like').onclick = () => { api().like(); toast('Saving to Liked Songs…'); };
+  $('#vol-down').onclick = () => api().volume('down');
+  $('#vol-up').onclick = () => api().volume('up');
+  $('#btn-mini').onclick = async () => { await api().open_mini(); toast('Mini player opened'); };
 
   $('#btn-check-update').onclick = async () => {
     $('#upd-status').textContent = 'checking…';

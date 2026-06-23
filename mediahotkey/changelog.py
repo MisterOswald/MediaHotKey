@@ -2,6 +2,17 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.13",
+        "notes": [
+            "Added volume +/- buttons to the now-playing panel (Spotify volume "
+            "when available, otherwise system volume).",
+            "Added a Mini player: a small always-on-top overlay with cover art, "
+            "skip/prev/play, add-to-playlist, like and volume — stays on top of "
+            "borderless games. Open it from the now-playing panel; closing it "
+            "leaves the main app running.",
+        ],
+    },
+    {
         "version": "1.0.12",
         "notes": [
             "Reworked exe self-update to be reliable and silent — no more stuck "

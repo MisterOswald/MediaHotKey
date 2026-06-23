@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MediaHotKey Mini</title>
+<link rel="stylesheet" href="fonts.css">
+<style>
+  :root{
+    --paper:#F6EFE1; --card:#FFFDF8; --field-border:#E3D4B6; --panel-border:#E6D8BD;
+    --ink:#574734; --body:#6e5c44; --muted:#9a876e; --faint:#b7a384;
+    --terra:#CC7E4F; --terra-top:#E0B254;
+    --ui:'Zen Maru Gothic','Yu Gothic UI','Segoe UI',system-ui,sans-serif;
+    --mono:'JetBrains Mono','Consolas',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{font-family:var(--ui);background:linear-gradient(170deg,#FBF3E3,#F4E8CE);
+    color:var(--ink);user-select:none;overflow:hidden}
+  .wrap{display:flex;flex-direction:column;height:100vh;padding:10px 12px 12px}
+  .bar{display:flex;align-items:center;justify-content:space-between;height:22px;flex:none}
+  .bar .grip{flex:1;height:100%;font:700 9px var(--mono);letter-spacing:.16em;color:#C0925A;
+    display:flex;align-items:center}
+  .bar .x{cursor:pointer;color:var(--terra);font-size:14px;padding:0 4px}
+  .art{width:100%;flex:1 1 auto;min-height:120px;border-radius:12px;border:2px dashed #E0C99A;
+    background-size:contain;background-repeat:no-repeat;background-position:center;margin:8px 0;
+    background-color:rgba(0,0,0,.03)}
+  .art.filled{border-style:solid;border-color:var(--panel-border)}
+  .t{font:700 16px var(--ui);color:var(--ink);line-height:1.15;overflow:hidden;
+    display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow-wrap:anywhere}
+  .a{font:500 12.5px var(--ui);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .barwrap{margin:7px 0 2px}
+  .pbar{height:5px;border-radius:5px;background:var(--panel-border);overflow:hidden}
+  .pfill{height:100%;width:0;background:linear-gradient(90deg,var(--terra-top),var(--terra))}
+  .times{display:flex;justify-content:space-between;font:500 10px var(--mono);color:var(--faint);margin-top:3px}
+  .row{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:8px}
+  .tbtn{width:34px;height:34px;border-radius:50%;background:var(--card);border:1px solid var(--field-border);
+    display:flex;align-items:center;justify-content:center;color:#8a7558;cursor:pointer;font-size:13px}
+  .tbtn.play{width:44px;height:44px;color:#fff;font-size:16px;border:0;
+    background:linear-gradient(135deg,var(--terra-top),var(--terra));
+    box-shadow:0 6px 14px -5px rgba(204,126,79,.55)}
+  .tbtn:active,.sbtn:active{transform:translateY(1px)}
+  .row2{display:flex;gap:8px;margin-top:9px}
+  .sbtn{flex:1;padding:7px 0;border-radius:9px;border:1px solid var(--field-border);
+    background:var(--card);color:#8a7558;font:600 13px var(--ui);cursor:pointer}
+  .sbtn.add{border:0;color:#fff;background:linear-gradient(135deg,var(--terra-top),var(--terra))}
+  .sbtn:hover{filter:brightness(.98)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="bar pywebview-drag-region">
+    <div class="grip">♪ MEDIAHOTKEY</div>
+    <div class="x" id="x" title="Close mini player">✕</div>
+  </div>
+  <div class="art" id="art"></div>
+  <div class="t" id="t">—</div>
+  <div class="a" id="a">not playing</div>
+  <div class="barwrap">
+    <div class="pbar"><div class="pfill" id="fill"></div></div>
+    <div class="times"><span id="cur">0:00</span><span id="dur">0:00</span></div>
+  </div>
+  <div class="row">
+    <div class="tbtn" id="prev">⏮</div>
+    <div class="tbtn play" id="play">❚❚</div>
+    <div class="tbtn" id="next">⏭</div>
+  </div>
+  <div class="row2">
+    <button class="sbtn" id="vdown">🔉 −</button>
+    <button class="sbtn" id="vup">🔊 ＋</button>
+  </div>
+  <div class="row2">
+    <button class="sbtn add" id="add">＋ Add to playlist</button>
+    <button class="sbtn" id="like" title="Like">♥</button>
+  </div>
+</div>
+<script src="mini.js"></script>
+</body>
+</html>

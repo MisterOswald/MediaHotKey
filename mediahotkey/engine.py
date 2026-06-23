@@ -23,6 +23,7 @@ import time
 import base64
 import asyncio
 import threading
+import os
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -354,6 +355,40 @@ class Engine:
             sp.current_user_saved_tracks_add([track["id"]])
             self.notify_track("💚 Liked", track, "like", footer="Saved to Liked Songs")
         self._run_async(lambda: self._safe(save, "like song"))
+
+    def volume(self, delta):
+        """Adjust volume by `delta` percent. Prefers the Spotify Web API (when
+        authorized, with an active device + Premium); otherwise nudges the
+        Windows system volume via the media keys."""
+        def go():
+            # Spotify Web API volume (no keystroke injection).
+            if (SPOTIPY_AVAILABLE and self.config["spotify"].get("client_id")
+                    and os.path.exists(token_cache_path())):
+                try:
+                    sp = self._ensure_spotify()
+                    pb = sp.current_playback()
+                    dev = (pb or {}).get("device") or {}
+                    vol = dev.get("volume_percent")
+                    if vol is not None:
+                        newv = max(0, min(100, int(vol) + delta))
+                        sp.volume(newv)
+                        self.log(f"[ok] Spotify volume {newv}%")
+                        return
+                except Exception:  # noqa: BLE001
+                    pass
+            # Fallback: system master volume via the volume media keys.
+            if KEYBOARD_AVAILABLE:
+                key = "volume up" if delta > 0 else "volume down"
+                steps = max(1, abs(int(delta)) // 4)
+                for _ in range(steps):
+                    try:
+                        keyboard.send(key)
+                    except Exception:  # noqa: BLE001
+                        break
+                self.log(f"[ok] system {key} x{steps}")
+            else:
+                self.notify_text("⚠️ volume: no control method available", "error")
+        self._run_async(lambda: self._safe(go, "volume"))
 
     # ------------------------------------------------------- media (SMTC)
     def _pick_session(self, mgr):

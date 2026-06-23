@@ -70,6 +70,7 @@ class Api:
         self.logs = collections.deque(maxlen=400)
         self._log_lock = threading.Lock()
         self.window = None
+        self.mini_window = None
         self._allow_close = False
         self._tray = None
         self.engine = Engine(self.config, log=self._log,
@@ -310,6 +311,47 @@ class Api:
 
     def like(self):
         self.engine.sp_like()
+        return {"ok": True}
+
+    def volume(self, direction):
+        self.engine.volume(10 if direction == "up" else -10)
+        return {"ok": True}
+
+    # -- mini player (always-on-top overlay window) -----------------------
+    def open_mini(self):
+        if self.mini_window is not None:
+            try:
+                self.mini_window.show()
+            except Exception:  # noqa: BLE001
+                pass
+            return {"ok": True}
+        try:
+            mini_index = os.path.join(_resource_dir(), "mini.html")
+            self.mini_window = webview.create_window(
+                "MediaHotKey Mini", url=mini_index, js_api=self,
+                width=300, height=430, resizable=False, frameless=True,
+                on_top=True, background_color="#F6EFE1")
+
+            def _closed():
+                self.mini_window = None
+            try:
+                self.mini_window.events.closed += lambda *a: _closed()
+            except Exception:  # noqa: BLE001
+                pass
+        except Exception as exc:  # noqa: BLE001
+            self._log(f"[!] mini player: {exc}")
+            self.mini_window = None
+            return {"ok": False, "msg": str(exc)}
+        return {"ok": True}
+
+    def close_mini(self):
+        w = self.mini_window
+        self.mini_window = None
+        if w is not None:
+            try:
+                w.destroy()
+            except Exception:  # noqa: BLE001
+                pass
         return {"ok": True}
 
     # -- tests ------------------------------------------------------------
