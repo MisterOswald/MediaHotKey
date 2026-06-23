@@ -2,6 +2,14 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.14",
+        "notes": [
+            "Fixed the '404 / failed to remove temp directory' error after an "
+            "update restart — the relaunched exe now extracts its own files "
+            "instead of reusing the old one's (cleared the inherited _MEIPASS2).",
+        ],
+    },
+    {
         "version": "1.0.13",
         "notes": [
             "Added volume +/- buttons to the now-playing panel (Spotify volume "

@@ -227,6 +227,19 @@ def cleanup_stale():
             pass
 
 
+def _child_env():
+    """Environment for relaunching a frozen build. PyInstaller's onefile
+    bootloader passes _MEIPASS2 (and friends) to child processes so they reuse
+    the parent's extracted temp dir — but the parent deletes that dir on exit,
+    leaving the child with missing files (404) and a 'failed to remove temp
+    directory' warning. Strip them so the new exe extracts its own copy."""
+    env = os.environ.copy()
+    for k in ("_MEIPASS2", "_PYI_APPLICATION_HOME_DIR", "_PYI_ARCHIVE_FILE",
+              "_PYIBoot_SPLASH", "_MEIPASS"):
+        env.pop(k, None)
+    return env
+
+
 def _swap_and_launch(new, cur):
     """Swap a freshly downloaded exe in WITHOUT a helper batch.
 
@@ -252,7 +265,8 @@ def _swap_and_launch(new, cur):
             pass
         return False
     try:
-        subprocess.Popen([cur], cwd=os.path.dirname(cur), close_fds=True)
+        subprocess.Popen([cur], cwd=os.path.dirname(cur), close_fds=True,
+                         env=_child_env())
     except Exception:  # noqa: BLE001
         return False
     return True
@@ -265,7 +279,8 @@ def relaunch():
         if is_frozen():
             if _pending_exe:
                 return _swap_and_launch(*_pending_exe)
-            subprocess.Popen([sys.executable], cwd=install_dir(), close_fds=True)
+            subprocess.Popen([sys.executable], cwd=install_dir(), close_fds=True,
+                             env=_child_env())
         else:
             run_py = os.path.join(install_dir(), "run.py")
             subprocess.Popen([sys.executable, run_py], cwd=install_dir(),
