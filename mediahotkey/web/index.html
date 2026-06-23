@@ -151,8 +151,10 @@
         <div class="tbtn" id="tp-next">⏭</div>
       </div>
       <div class="vol">
-        <button class="vbtn" id="vol-down" title="Volume down">🔉 −</button>
-        <button class="vbtn" id="vol-up" title="Volume up">🔊 ＋</button>
+        <button class="vbtn sm" id="vol-down" title="Volume down">🔉</button>
+        <input type="range" min="0" max="100" value="50" class="vrange" id="vol-range">
+        <button class="vbtn sm" id="vol-up" title="Volume up">🔊</button>
+        <span class="vpct" id="vol-pct">—</span>
       </div>
       <div class="np-actions">
         <button class="np-act add" id="np-add" title="Add the current track to its playlist (Spotify)">＋ Add to playlist</button>

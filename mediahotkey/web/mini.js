@@ -9,6 +9,7 @@ const api = () => window.pywebview.api;
 
 let cur = null;
 let lastArt = '';
+let volDragging = false;
 
 function fmt(ms) {
   const s = Math.max(0, Math.floor((ms || 0) / 1000));
@@ -21,6 +22,12 @@ function render(np) {
   $('t').textContent = np.title || '—';
   $('a').textContent = np.artist || (np.title ? '' : 'not playing');
   $('play').textContent = np.is_playing ? '❚❚' : '▶';
+  if (np.volume != null && np.volume !== undefined) {
+    $('vpct').textContent = np.volume + '%';
+    if (!volDragging) $('vrange').value = np.volume;
+  } else if (!volDragging) {
+    $('vpct').textContent = '—';
+  }
   const art = np.art_url || '';
   if (art !== lastArt) {
     lastArt = art;
@@ -53,6 +60,11 @@ function wire() {
   $('next').onclick = () => api().transport('next');
   $('vdown').onclick = () => api().volume('down');
   $('vup').onclick = () => api().volume('up');
+  $('vrange').oninput = () => { volDragging = true; $('vpct').textContent = $('vrange').value + '%'; };
+  $('vrange').onchange = async () => {
+    await api().set_volume(parseInt($('vrange').value, 10));
+    setTimeout(() => { volDragging = false; }, 400);
+  };
   $('add').onclick = () => api().add_to_playlist();
   $('like').onclick = () => api().like();
   $('x').onclick = () => api().close_mini();

@@ -367,13 +367,12 @@ class Engine:
             self.notify_track("💚 Liked", track, "like", footer="Saved to Liked Songs")
         self._run_async(lambda: self._safe(save, "like song"))
 
-    def _pycaw_volume(self, delta, hint):
-        """Adjust per-application volume via Windows Core Audio. Targets the
-        app whose process name contains `hint` (e.g. 'brave'); if none match,
-        targets whatever session is actually producing sound. Returns True if
-        it changed something."""
+    def _pycaw_volume_op(self, hint, op, value=None):
+        """get/add/set per-app volume via Core Audio. Targets the process whose
+        name contains `hint`, else whatever session is making sound. Returns the
+        resulting level as 0..1 (or None if nothing to control)."""
         if not PYCAW_AVAILABLE:
-            return False
+            return None
         try:
             comtypes.CoInitialize()
         except Exception:  # noqa: BLE001
@@ -402,50 +401,54 @@ class Engine:
                     pass
             targets = by_hint or audible
             if not targets:
-                return False
-            step = delta / 100.0
+                return None
+            if op == "get":
+                return targets[0].GetMasterVolume()
             for vol in targets:
                 cur = vol.GetMasterVolume()
-                vol.SetMasterVolume(max(0.0, min(1.0, cur + step)), None)
-            return True
+                newv = value if op == "set" else cur + value
+                vol.SetMasterVolume(max(0.0, min(1.0, newv)), None)
+            return targets[0].GetMasterVolume()
         except Exception as exc:  # noqa: BLE001
             self.log(f"[i] volume (pycaw): {exc}")
-            return False
+            return None
         finally:
             try:
                 comtypes.CoUninitialize()
             except Exception:  # noqa: BLE001
                 pass
 
+    def _hint(self):
+        return (self.config["settings"].get("media_app_hint", "") or "").lower()
+
+    def read_app_volume(self):
+        """Current per-app volume as 0-100, or None (for the now-playing panel)."""
+        lvl = self._pycaw_volume_op(self._hint(), "get")
+        return None if lvl is None else int(round(lvl * 100))
+
+    def _spotify_set_volume(self, percent):
+        sp = self._ensure_spotify()
+        sp.volume(max(0, min(100, int(percent))))
+
     def volume(self, delta):
-        """Adjust volume by `delta` percent, controlling whatever's playing:
-        the Spotify Web API for a remote Spotify track, otherwise the specific
-        app's volume (browser / desktop player) via Core Audio, falling back to
-        the system volume media keys."""
+        """Nudge volume by `delta`% — Spotify Web API for a remote Spotify
+        track, otherwise the app's own volume, else system media keys."""
         def go():
             src = (self.now_playing or {}).get("source")
-            # 1) Remote Spotify (Web API) playback — set the device volume.
             if (src == "spotify" and SPOTIPY_AVAILABLE
                     and self.config["spotify"].get("client_id")
                     and os.path.exists(token_cache_path())):
                 try:
-                    sp = self._ensure_spotify()
-                    pb = sp.current_playback()
-                    dev = (pb or {}).get("device") or {}
-                    vol = dev.get("volume_percent")
+                    pb = self._ensure_spotify().current_playback()
+                    vol = ((pb or {}).get("device") or {}).get("volume_percent")
                     if vol is not None:
-                        newv = max(0, min(100, int(vol) + delta))
-                        sp.volume(newv)
-                        self.log(f"[ok] Spotify volume {newv}%")
+                        self._spotify_set_volume(int(vol) + delta)
+                        self.log(f"[ok] Spotify volume {max(0, min(100, int(vol) + delta))}%")
                         return
                 except Exception:  # noqa: BLE001
                     pass
-            # 2) Per-app volume (browser / local player).
-            hint = (self.config["settings"].get("media_app_hint", "") or "").lower()
-            if self._pycaw_volume(delta, hint):
-                self.log(f"[ok] app volume {'+' if delta > 0 else ''}{delta}%")
+            if self._pycaw_volume_op(self._hint(), "add", delta / 100.0) is not None:
                 return
-            # 3) Fallback: system master volume via the media keys.
             if KEYBOARD_AVAILABLE:
                 key = "volume up" if delta > 0 else "volume down"
                 for _ in range(max(1, abs(int(delta)) // 4)):
@@ -453,10 +456,25 @@ class Engine:
                         keyboard.send(key)
                     except Exception:  # noqa: BLE001
                         break
-                self.log(f"[ok] system {key}")
             else:
                 self.notify_text("⚠️ volume: no control method available", "error")
         self._run_async(lambda: self._safe(go, "volume"))
+
+    def set_volume(self, percent):
+        """Set an absolute volume level (0-100) from the UI slider."""
+        percent = max(0, min(100, int(percent)))
+        def go():
+            src = (self.now_playing or {}).get("source")
+            if (src == "spotify" and SPOTIPY_AVAILABLE
+                    and self.config["spotify"].get("client_id")
+                    and os.path.exists(token_cache_path())):
+                try:
+                    self._spotify_set_volume(percent)
+                    return
+                except Exception:  # noqa: BLE001
+                    pass
+            self._pycaw_volume_op(self._hint(), "set", percent / 100.0)
+        self._run_async(lambda: self._safe(go, "set volume"))
 
     # ------------------------------------------------------- media (SMTC)
     def _pick_session(self, mgr):
@@ -733,6 +751,7 @@ class Engine:
             "duration_ms": track.get("duration_ms") or 0,
             "is_playing": pb.get("is_playing", False),
             "source": "spotify",
+            "volume": (pb.get("device") or {}).get("volume_percent"),
             "fetched_at": int(time.time() * 1000),
         }
 

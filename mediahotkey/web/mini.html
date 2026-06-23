@@ -40,11 +40,17 @@
     background:linear-gradient(135deg,var(--terra-top),var(--terra));
     box-shadow:0 6px 14px -5px rgba(204,126,79,.55)}
   .tbtn:active,.sbtn:active{transform:translateY(1px)}
-  .row2{display:flex;gap:8px;margin-top:9px}
+  .row2{display:flex;gap:8px;margin-top:9px;align-items:center}
   .sbtn{flex:1;padding:7px 0;border-radius:9px;border:1px solid var(--field-border);
     background:var(--card);color:#8a7558;font:600 13px var(--ui);cursor:pointer}
+  .sbtn.ic{flex:none;width:34px;padding:6px 0;font-size:14px}
   .sbtn.add{border:0;color:#fff;background:linear-gradient(135deg,var(--terra-top),var(--terra))}
   .sbtn:hover{filter:brightness(.98)}
+  .vrange{flex:1;-webkit-appearance:none;appearance:none;height:6px;border-radius:6px;
+    background:var(--panel-border);outline:none;cursor:pointer}
+  .vrange::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:15px;height:15px;
+    border-radius:50%;background:var(--terra);border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+  .vpct{flex:none;width:34px;text-align:right;font:600 11px var(--mono);color:var(--muted)}
 </style>
 </head>
 <body>
@@ -66,8 +72,10 @@
     <div class="tbtn" id="next">⏭</div>
   </div>
   <div class="row2">
-    <button class="sbtn" id="vdown">🔉 −</button>
-    <button class="sbtn" id="vup">🔊 ＋</button>
+    <button class="sbtn ic" id="vdown">🔉</button>
+    <input type="range" min="0" max="100" value="50" class="vrange" id="vrange">
+    <button class="sbtn ic" id="vup">🔊</button>
+    <span class="vpct" id="vpct">—</span>
   </div>
   <div class="row2">
     <button class="sbtn add" id="add">＋ Add to playlist</button>

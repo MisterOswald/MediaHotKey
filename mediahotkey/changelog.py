@@ -2,6 +2,14 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.17",
+        "notes": [
+            "The volume control now shows the level: a live volume slider with a "
+            "percentage in the main panel and the mini player. Drag it to set the "
+            "volume, or use −/+ — and you can see the current position.",
+        ],
+    },
+    {
         "version": "1.0.16",
         "notes": [
             "Volume +/- now controls browser / app media properly (per-app "

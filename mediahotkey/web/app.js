@@ -24,6 +24,7 @@ let running = false;
 let mascotImage = '';    // user-chosen art (data URL)
 let lastArt = '';        // currently shown art url
 let updateBusy = false;  // an update install is in progress
+let volDragging = false; // user is dragging the volume slider
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -46,7 +47,7 @@ const DEMO = {
   running: true, mode: 'spotify',
   config_path: 'C:\\Users\\you\\AppData\\Roaming\\MediaHotKey\\config.json',
   now_playing: { title: 'TANK', artist: 'NMIXX', art_url: null,
-    progress_ms: 102000, duration_ms: 185000, is_playing: true, source: 'spotify' },
+    progress_ms: 102000, duration_ms: 185000, is_playing: true, source: 'spotify', volume: 65 },
   logs: [
     '[ok] ♪  Now Playing: Kep1er — WA DA DA (Japanese ver.)',
     '[ok] ⇄  Switched to SPOTIFY mode',
@@ -65,6 +66,7 @@ const MOCK = {
   toggle_engine: async () => { DEMO.running = !DEMO.running; return { ok: true }; },
   transport: async () => ({ ok: true }),
   volume: async () => ({ ok: true }),
+  set_volume: async () => ({ ok: true }),
   add_to_playlist: async () => ({ ok: true }),
   like: async () => ({ ok: true }),
   open_mini: async () => ({ ok: true }),
@@ -207,6 +209,12 @@ function renderNowPlaying(np) {
   $('#np-artist').textContent = np.artist || (np.title ? '' : 'not playing');
   $('#tp-play').textContent = np.is_playing ? '❚❚' : '▶';
   setArt(np.art_url);
+  if (np.volume != null && np.volume !== undefined) {
+    $('#vol-pct').textContent = np.volume + '%';
+    if (!volDragging) $('#vol-range').value = np.volume;
+  } else if (!volDragging) {
+    $('#vol-pct').textContent = '—';
+  }
   tickProgress();
 }
 
@@ -299,6 +307,14 @@ function wire() {
   $('#np-like').onclick = () => { api().like(); toast('Saving to Liked Songs…'); };
   $('#vol-down').onclick = () => api().volume('down');
   $('#vol-up').onclick = () => api().volume('up');
+  $('#vol-range').oninput = () => {
+    volDragging = true;
+    $('#vol-pct').textContent = $('#vol-range').value + '%';
+  };
+  $('#vol-range').onchange = async () => {
+    await api().set_volume(parseInt($('#vol-range').value, 10));
+    setTimeout(() => { volDragging = false; }, 400);
+  };
   $('#btn-mini').onclick = async () => { await api().open_mini(); toast('Mini player opened'); };
 
   $('#btn-check-update').onclick = async () => {

@@ -212,11 +212,18 @@ input.field::placeholder { color: #c7b594; }
 .np-act.like { font-size: 15px; padding: 9px 13px; }
 .np-act.like:hover { color: var(--like, #E91E63); }
 
-.vol { display: flex; gap: 10px; justify-content: center; }
+.vol { display: flex; gap: 9px; align-items: center; }
 .vbtn { flex: 1; padding: 8px 0; border-radius: 10px; border: 1px solid var(--field-border);
   background: #FFFDF8; color: #8a7558; font: 600 14px var(--ui); cursor: pointer; }
+.vbtn.sm { flex: none; width: 38px; padding: 6px 0; font-size: 15px; }
 .vbtn:hover { background: #F2E9D6; }
 .vbtn:active { transform: translateY(1px); }
+.vpct { flex: none; width: 38px; text-align: right; font: 600 12px var(--mono); color: var(--muted); }
+.vrange { flex: 1; -webkit-appearance: none; appearance: none; height: 6px; border-radius: 6px;
+  background: var(--panel-border); outline: none; cursor: pointer; }
+.vrange::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px;
+  border-radius: 50%; background: var(--terra); border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,.3); }
 .np-mini { width: 100%; padding: 9px 0; border: 1px solid var(--field-border); border-radius: 10px;
   background: #F2E9D6; color: #8a7558; font: 600 13.5px var(--ui); cursor: pointer; }
 .np-mini:hover { background: #eaddc0; }

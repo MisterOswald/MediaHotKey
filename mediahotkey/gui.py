@@ -144,6 +144,13 @@ class Api:
                 # measured) so the JS progress bar extrapolates correctly even
                 # across the throttled Spotify reads — don't overwrite it here.
                 np.setdefault("fetched_at", int(now * 1000))
+                # Volume level for the panel: Spotify reader already includes it;
+                # for local/app sources read the per-app volume via Core Audio.
+                if np.get("source") != "spotify" and np.get("volume") is None:
+                    try:
+                        np["volume"] = self.engine.read_app_volume()
+                    except Exception:  # noqa: BLE001
+                        np["volume"] = None
                 self.engine.now_playing = np
                 self._np_misses = 0
 
@@ -315,6 +322,10 @@ class Api:
 
     def volume(self, direction):
         self.engine.volume(10 if direction == "up" else -10)
+        return {"ok": True}
+
+    def set_volume(self, percent):
+        self.engine.set_volume(percent)
         return {"ok": True}
 
     # -- mini player (always-on-top overlay window) -----------------------
