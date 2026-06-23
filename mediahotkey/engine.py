@@ -686,6 +686,7 @@ class Engine:
             "title": title or "Unknown", "artist": artist, "art_url": art_url,
             "progress_ms": progress_ms, "duration_ms": duration_ms,
             "is_playing": is_playing, "source": "media",
+            "app": aumid.lower(),
             "fetched_at": int(time.time() * 1000),
         }
 

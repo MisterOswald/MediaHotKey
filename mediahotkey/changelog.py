@@ -2,6 +2,16 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.19",
+        "notes": [
+            "Spotify volume now syncs both ways: the app uses Spotify's own "
+            "volume (Web API), so changing it in either place updates the other "
+            "(Spotify Premium required to set volume).",
+            "Browser/stream volume still controls the browser's app volume; a "
+            "website's in-page player slider can't be moved from outside.",
+        ],
+    },
+    {
         "version": "1.0.18",
         "notes": [
             "Fixed the slow startup introduced with per-app volume — the audio "

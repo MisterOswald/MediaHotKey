@@ -122,12 +122,17 @@ class Api:
 
             if MEDIA_AVAILABLE:
                 np = self.engine.read_media_now_playing()
-            if np is None and can_spotify:
-                # Throttled (~3s) + reused between checks.
+            # When the active app is Spotify (or nothing local is playing) and
+            # the Web API is authorized, use the Web API now-playing — its
+            # volume is Spotify's OWN volume, so the slider stays in sync with
+            # Spotify's UI both ways. (Throttled to ~3s.)
+            is_spotify_app = bool(np and "spotify" in (np.get("app") or ""))
+            if can_spotify and (np is None or is_spotify_app):
                 if now - self._np_last_spotify_t >= 3:
                     self._np_last_spotify_t = now
                     self._np_last_spotify = self.engine.read_spotify_now_playing()
-                np = self._np_last_spotify
+                if self._np_last_spotify:
+                    np = self._np_last_spotify
 
             if np:
                 # Lock the cover art to the first one we get for this track so
