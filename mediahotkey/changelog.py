@@ -2,6 +2,15 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.22",
+        "notes": [
+            "Spotify volume now always uses Spotify's own volume (Web API) — "
+            "never the Windows mixer — so the app's slider matches Spotify's "
+            "exactly (requires authorizing on the Spotify tab; Premium needed "
+            "to set). Volume changes also reflect instantly in the UI.",
+        ],
+    },
+    {
         "version": "1.0.21",
         "notes": [
             "Brought back the separate floating Mini player window (the clean "

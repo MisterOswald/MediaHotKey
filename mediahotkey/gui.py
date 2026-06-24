@@ -153,8 +153,11 @@ class Api:
                 np.setdefault("fetched_at", int(now * 1000))
                 # Volume level for the panel: Spotify reader already includes it;
                 # for local/app sources read the per-app volume via Core Audio,
-                # throttled (pycaw enumeration is relatively costly).
-                if np.get("source") != "spotify" and np.get("volume") is None:
+                # throttled (pycaw enumeration is relatively costly). Never read
+                # the mixer level for Spotify — its real volume is the Web API
+                # one (so the slider matches Spotify's own slider).
+                if (np.get("source") != "spotify" and not is_spotify_app
+                        and np.get("volume") is None):
                     if now - self._np_last_vol_t >= 2.5:
                         self._np_last_vol_t = now
                         try:

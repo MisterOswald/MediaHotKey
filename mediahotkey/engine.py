@@ -435,6 +435,12 @@ class Engine:
     def _hint(self):
         return (self.config["settings"].get("media_app_hint", "") or "").lower()
 
+    def _is_spotify_now(self):
+        """True if the current track is Spotify (by source or the SMTC app id),
+        so volume routes through Spotify's own volume rather than the mixer."""
+        np = self.now_playing or {}
+        return np.get("source") == "spotify" or "spotify" in (np.get("app") or "")
+
     def read_app_volume(self):
         """Current per-app volume as 0-100, or None (for the now-playing panel)."""
         lvl = self._pycaw_volume_op(self._hint(), "get")
@@ -445,23 +451,26 @@ class Engine:
         sp.volume(max(0, min(100, int(percent))))
 
     def volume(self, delta):
-        """Nudge volume by `delta`% — Spotify Web API for a remote Spotify
-        track, otherwise the app's own volume, else system media keys."""
+        """Nudge volume by `delta`% — Spotify Web API for a Spotify track,
+        otherwise the app's own volume, else system media keys."""
         def go():
-            src = (self.now_playing or {}).get("source")
-            if (src == "spotify" and SPOTIPY_AVAILABLE
+            if (self._is_spotify_now() and SPOTIPY_AVAILABLE
                     and self.config["spotify"].get("client_id")
                     and os.path.exists(token_cache_path())):
                 try:
                     pb = self._ensure_spotify().current_playback()
                     vol = ((pb or {}).get("device") or {}).get("volume_percent")
                     if vol is not None:
-                        self._spotify_set_volume(int(vol) + delta)
-                        self.log(f"[ok] Spotify volume {max(0, min(100, int(vol) + delta))}%")
+                        newv = max(0, min(100, int(vol) + delta))
+                        self._spotify_set_volume(newv)
+                        self.now_playing["volume"] = newv   # reflect instantly
+                        self.log(f"[ok] Spotify volume {newv}%")
                         return
                 except Exception:  # noqa: BLE001
                     pass
-            if self._pycaw_volume_op(self._hint(), "add", delta / 100.0) is not None:
+            lvl = self._pycaw_volume_op(self._hint(), "add", delta / 100.0)
+            if lvl is not None:
+                self.now_playing["volume"] = int(round(lvl * 100))
                 return
             if KEYBOARD_AVAILABLE:
                 key = "volume up" if delta > 0 else "volume down"
@@ -478,16 +487,18 @@ class Engine:
         """Set an absolute volume level (0-100) from the UI slider."""
         percent = max(0, min(100, int(percent)))
         def go():
-            src = (self.now_playing or {}).get("source")
-            if (src == "spotify" and SPOTIPY_AVAILABLE
+            if (self._is_spotify_now() and SPOTIPY_AVAILABLE
                     and self.config["spotify"].get("client_id")
                     and os.path.exists(token_cache_path())):
                 try:
                     self._spotify_set_volume(percent)
+                    self.now_playing["volume"] = percent   # reflect instantly
                     return
                 except Exception:  # noqa: BLE001
                     pass
-            self._pycaw_volume_op(self._hint(), "set", percent / 100.0)
+            lvl = self._pycaw_volume_op(self._hint(), "set", percent / 100.0)
+            if lvl is not None:
+                self.now_playing["volume"] = int(round(lvl * 100))
         self._run_async(lambda: self._safe(go, "set volume"))
 
     # ------------------------------------------------------- media (SMTC)
