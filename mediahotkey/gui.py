@@ -89,10 +89,6 @@ class Api:
         self._np_last_vol_t = 0.0
         self._np_thread = None
         self._update_info = {}       # last update-check result (for the UI)
-        caps = Engine.capabilities()
-        self._log(f"[dbg:init] keyboard={caps['keyboard']} spotipy={caps['spotipy']} "
-                  f"media/SMTC={caps['media']} token_cache="
-                  f"{os.path.exists(token_cache_path())}")
 
     def start_now_playing(self):
         if self._np_thread is None:
@@ -167,24 +163,11 @@ class Api:
                     np["volume"] = self._np_last_vol
                 self.engine.now_playing = np
                 self._np_misses = 0
-
-                # Log the final decision whenever it meaningfully changes.
-                art = np.get("art_url") or ""
-                kind = "none" if not art else ("data" if art.startswith("data:") else "url")
-                sig = f"{np.get('source')}|{np.get('title')}|{kind}|{np.get('is_playing')}"
-                if sig != self._np_last_sig:
-                    self._np_last_sig = sig
-                    self._log(f"[dbg:np] source={np.get('source')} "
-                              f"title={np.get('title')!r} art={kind} "
-                              f"playing={np.get('is_playing')}")
             else:
                 # Don't blank on a single transient miss — hold the last track
                 # (paused) and only clear after several seconds of nothing.
                 self._np_misses += 1
                 if self._np_misses >= 8:
-                    if self._np_last_sig != "cleared":
-                        self._np_last_sig = "cleared"
-                        self._log("[dbg:np] cleared — no source playing")
                     self.engine.now_playing = {
                         "title": None, "artist": None, "art_url": None,
                         "progress_ms": 0, "duration_ms": 0, "is_playing": False,
@@ -228,16 +211,19 @@ class Api:
         }
 
     def poll(self):
-        with self._log_lock:
-            logs = list(self.logs)
+        # Lightweight: NO logs here (they're large and would cross the bridge
+        # every second). The UI fetches logs via get_logs() only on the Log tab.
         return {
             "running": self.engine.running,
             "mode": self.engine.mode,
             "caps": Engine.capabilities(),
             "now_playing": self.engine.now_playing,
-            "logs": logs,
             "update": self._update_info,
         }
+
+    def get_logs(self):
+        with self._log_lock:
+            return {"logs": list(self.logs)}
 
     # -- updates ----------------------------------------------------------
     def check_update(self):

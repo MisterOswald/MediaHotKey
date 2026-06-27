@@ -2,6 +2,17 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.23",
+        "notes": [
+            "Fixed lag that built up over time — stopped streaming the whole "
+            "activity log across the UI every second (it's now fetched only when "
+            "the Log tab is open) and turned off the noisy debug logging.",
+            "Fixed 'no active Spotify device' on skip/play-pause: it now falls "
+            "back to controlling the Spotify desktop app directly via Windows "
+            "media when the Web API has no active device.",
+        ],
+    },
+    {
         "version": "1.0.22",
         "notes": [
             "Spotify volume now always uses Spotify's own volume (Web API) — "

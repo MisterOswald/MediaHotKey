@@ -76,6 +76,7 @@ const MOCK = {
   test_discord: async () => ({ ok: true, msg: 'Test message sent. Check your channel.' }),
   record_hotkey: async () => '', open_url: () => {}, choose_mascot: async () => '',
   clear_log: async () => { DEMO.logs = []; return { ok: true }; },
+  get_logs: async () => ({ logs: DEMO.logs }),
   get_changelog: async () => [
     { version: '1.0.5', notes: ['Now-playing cover shows the full art, no cropping.',
       'Added this patch-notes dropdown.'] },
@@ -101,7 +102,10 @@ function renderTabs() {
     const el = document.createElement('div');
     el.className = 'tab' + (name === activeTab ? ' active' : '');
     el.textContent = name;
-    el.onclick = () => { activeTab = name; renderTabs(); renderPanels(); };
+    el.onclick = () => {
+      activeTab = name; renderTabs(); renderPanels();
+      if (name === 'Log') api().get_logs().then((lg) => renderLog(lg.logs)).catch(() => {});
+    };
     host.appendChild(el);
   });
 }
@@ -256,10 +260,15 @@ function renderRunning(isRunning, mode) {
     btn.textContent = '▶ Start hotkeys'; }
 }
 
+let lastLogSig = '';
 function renderLog(lines) {
+  lines = lines || [];
+  const sig = lines.length + '|' + (lines[lines.length - 1] || '');
+  if (sig === lastLogSig) return;     // nothing changed — skip the rebuild
+  lastLogSig = sig;
   const c = $('#console');
   const atBottom = c.scrollTop + c.clientHeight >= c.scrollHeight - 20;
-  c.innerHTML = (lines || []).map((l) => {
+  c.innerHTML = lines.map((l) => {
     let pre = '', body = l;
     const m = /^(\[[a-z!]+\]|\S+)\s+(.*)$/.exec(l);
     if (l.startsWith('[')) { const i = l.indexOf(']'); pre = l.slice(0, i + 1); body = l.slice(i + 1).trim(); }
@@ -434,8 +443,11 @@ async function poll() {
     renderRunning(p.running, p.mode);
     renderCaps(p.caps);
     renderNowPlaying(p.now_playing);
-    renderLog(p.logs);
     if (p.update) renderUpdate(p.update);
+    if (activeTab === 'Log') {           // logs are heavy — only when visible
+      const lg = await api().get_logs();
+      renderLog(lg.logs);
+    }
   } catch (e) { /* window closing */ }
 }
 
