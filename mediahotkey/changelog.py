@@ -2,6 +2,15 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.24",
+        "notes": [
+            "Hotkeys and skip/play-pause are instant again — the app now "
+            "controls the local Spotify desktop app via Windows media first "
+            "instead of trying the slow Spotify Web API, which removes the long "
+            "delay and the 'no active device / nothing playing' error.",
+        ],
+    },
+    {
         "version": "1.0.23",
         "notes": [
             "Fixed lag that built up over time — stopped streaming the whole "

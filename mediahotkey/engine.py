@@ -286,15 +286,15 @@ class Engine:
 
     def sp_next(self):
         def go():
-            try:
-                sp = self._ensure_spotify()
-                sp.next_track()
-                time.sleep(0.4)
-                self._announce_playback(self._current())
-            except spotipy.exceptions.SpotifyException as e:
-                if e.http_status in (403, 404) and self._smtc_fallback("next"):
-                    return
-                raise
+            # Local Windows-media control first — instant, and avoids the Web
+            # API's slow "no active device" round-trip. Web API only as a remote
+            # fallback. (Discord now-playing is posted by the background poller.)
+            if self._smtc_fallback("next"):
+                return
+            sp = self._ensure_spotify()
+            sp.next_track()
+            time.sleep(0.4)
+            self._announce_playback(self._current())
         self._run_async(lambda: self._safe(go, "next track"))
 
     def _smtc_fallback(self, action):
@@ -309,50 +309,47 @@ class Engine:
 
     def sp_prev(self):
         def go():
-            try:
-                sp = self._ensure_spotify()
-                sp.previous_track()
-                time.sleep(0.4)
-                self._announce_playback(self._current())
-            except spotipy.exceptions.SpotifyException as e:
-                if e.http_status in (403, 404) and self._smtc_fallback("prev"):
-                    return
-                raise
+            if self._smtc_fallback("prev"):
+                return
+            sp = self._ensure_spotify()
+            sp.previous_track()
+            time.sleep(0.4)
+            self._announce_playback(self._current())
         self._run_async(lambda: self._safe(go, "previous track"))
 
     def sp_playpause(self):
         def toggle():
-            try:
-                sp = self._ensure_spotify()
-                playback = self._current()
-                if playback and playback.get("is_playing"):
-                    sp.pause_playback()
-                    track = playback.get("item")
-                    with self._seen_lock:
-                        self._seen["is_playing"] = False
-                    if track:
-                        self.notify_track("⏸️ Paused", track, "pause",
-                                          footer=self._footer_for(playback))
-                    else:
-                        self.notify_text("⏸️ paused", "pause")
+            # Local Windows-media control first — instant, and avoids the Web
+            # API's slow "no active device" round-trip. Web API only as a remote
+            # fallback. (Discord now-playing is posted by the background poller.)
+            if self._smtc_fallback("playpause"):
+                return
+            sp = self._ensure_spotify()
+            playback = self._current()
+            if playback and playback.get("is_playing"):
+                sp.pause_playback()
+                track = playback.get("item")
+                with self._seen_lock:
+                    self._seen["is_playing"] = False
+                if track:
+                    self.notify_track("⏸️ Paused", track, "pause",
+                                      footer=self._footer_for(playback))
                 else:
-                    sp.start_playback()
-                    time.sleep(0.4)
-                    pb = self._current()
-                    track = pb.get("item") if pb else None
-                    with self._seen_lock:
-                        self._seen["is_playing"] = True
-                        if track:
-                            self._seen["track_id"] = track["id"]
+                    self.notify_text("⏸️ paused", "pause")
+            else:
+                sp.start_playback()
+                time.sleep(0.4)
+                pb = self._current()
+                track = pb.get("item") if pb else None
+                with self._seen_lock:
+                    self._seen["is_playing"] = True
                     if track:
-                        self.notify_track("▶️ Playing", track, "playing",
-                                          footer=self._footer_for(pb))
-                    else:
-                        self.notify_text("▶️ playing", "playing")
-            except spotipy.exceptions.SpotifyException as e:
-                if e.http_status in (403, 404) and self._smtc_fallback("playpause"):
-                    return
-                raise
+                        self._seen["track_id"] = track["id"]
+                if track:
+                    self.notify_track("▶️ Playing", track, "playing",
+                                      footer=self._footer_for(pb))
+                else:
+                    self.notify_text("▶️ playing", "playing")
         self._run_async(lambda: self._safe(toggle, "play/pause"))
 
     def sp_add(self):
