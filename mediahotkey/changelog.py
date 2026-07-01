@@ -2,6 +2,19 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.25",
+        "notes": [
+            "Fixed now-playing randomly not updating for a while then catching "
+            "up — the Spotify Web API and Windows-media reads now have hard "
+            "timeouts, so a slow/stalled network call can no longer freeze the "
+            "now-playing watcher until it eventually returns.",
+            "Fixed the window randomly stuttering / going unresponsive — the "
+            "now-playing data (including the cover image) is now only sent to "
+            "the UI when it actually changes instead of every second, cutting "
+            "the bridge traffic that caused the hitching.",
+        ],
+    },
+    {
         "version": "1.0.24",
         "notes": [
             "Hotkeys and skip/play-pause are instant again — the app now "

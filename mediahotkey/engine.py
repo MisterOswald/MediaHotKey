@@ -88,6 +88,14 @@ SCOPE = (
     "user-library-modify playlist-modify-public playlist-modify-private"
 )
 
+# Hard cap on any single Spotify Web API request. Without this, spotipy uses no
+# timeout, so a slow/stalled network call blocks the now-playing thread — the
+# panel stops updating until the socket finally returns ("loads after a while").
+SPOTIFY_TIMEOUT = 6
+# Ceiling for a single Windows-media (SMTC/WinRT) read or control call, so a
+# stuck native call can't wedge the now-playing loop or a hotkey thread.
+SMTC_TIMEOUT = 5
+
 
 def _build_session():
     """A requests session that auto-retries stale/idle connections."""
@@ -193,6 +201,7 @@ class Engine:
             raise RuntimeError("Spotify Client ID / Secret not set — open Settings.")
         self._sp = spotipy.Spotify(
             requests_session=_build_session(),
+            requests_timeout=SPOTIFY_TIMEOUT,
             retries=0,
             auth_manager=SpotifyOAuth(
                 client_id=spec["client_id"],
@@ -303,7 +312,7 @@ class Engine:
         if not MEDIA_AVAILABLE:
             return False
         try:
-            return bool(asyncio.run(self._control_active(action)))
+            return bool(self._run_smtc(self._control_active(action)))
         except Exception:  # noqa: BLE001
             return False
 
@@ -725,9 +734,17 @@ class Engine:
             "fetched_at": int(time.time() * 1000),
         }
 
+    @staticmethod
+    def _run_smtc(coro, timeout=SMTC_TIMEOUT):
+        """Run a WinRT coroutine with a hard timeout so a stuck native call
+        can't hang the caller forever. Returns None on timeout/error."""
+        async def _guarded():
+            return await asyncio.wait_for(coro, timeout)
+        return asyncio.run(_guarded())
+
     def read_media_now_playing(self):
         try:
-            return asyncio.run(self._smtc_snapshot())
+            return self._run_smtc(self._smtc_snapshot())
         except Exception as exc:  # noqa: BLE001
             self._dbg("smtc", f"snapshot crashed: {exc}")
             return None
@@ -772,7 +789,7 @@ class Engine:
                 self.notify_text("⚠️ media control needs winsdk "
                                  "(pip install winsdk)", "error")
                 return
-            ok = asyncio.run(self._control_active(action))
+            ok = self._run_smtc(self._control_active(action))
             if not ok:
                 self.log(f"[i] {action}: no controllable media session")
         self._run_async(lambda: self._safe(go, f"transport {action}"))

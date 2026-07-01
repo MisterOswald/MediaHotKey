@@ -442,7 +442,9 @@ async function poll() {
     const p = await api().poll();
     renderRunning(p.running, p.mode);
     renderCaps(p.caps);
-    renderNowPlaying(p.now_playing);
+    // now_playing is null when unchanged since the last poll — keep the current
+    // one (tickProgress keeps the bar moving) instead of re-rendering.
+    if (p.now_playing) renderNowPlaying(p.now_playing);
     if (p.update) renderUpdate(p.update);
     if (activeTab === 'Log') {           // logs are heavy — only when visible
       const lg = await api().get_logs();

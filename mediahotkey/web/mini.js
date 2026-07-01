@@ -50,7 +50,12 @@ function tick() {
 setInterval(tick, 500);
 
 async function poll() {
-  try { render((await api().poll_np()).now_playing); } catch (e) { /* closing */ }
+  // now_playing is null when unchanged — keep the current one (tick() keeps the
+  // bar moving) so the big cover payload isn't re-sent every second.
+  try {
+    const np = (await api().poll_np()).now_playing;
+    if (np) render(np);
+  } catch (e) { /* closing */ }
 }
 
 function wire() {

@@ -85,6 +85,11 @@ class Api:
         self._np_misses = 0
         self._np_art_by_track = {}   # {"title|artist": art_url} — stable cover
         self._np_last_sig = None
+        self._np_last_sig_t = 0.0
+        self._np_np_sig = None       # poll() de-dupe
+        self._np_np_sig_t = 0.0
+        self._mini_sig = None        # poll_np() de-dupe
+        self._mini_sig_t = 0.0
         self._np_last_vol = None
         self._np_last_vol_t = 0.0
         self._np_thread = None
@@ -210,14 +215,37 @@ class Api:
             "version": __version__,
         }
 
+    @staticmethod
+    def _np_sig(np):
+        """A cheap fingerprint of what the UI actually renders — used to avoid
+        re-serializing the (often large, data-URL cover) now-playing payload
+        across the bridge every second. The JS extrapolates the progress bar
+        locally from fetched_at, so it only needs a fresh payload when the
+        track / play-state / volume / art changes."""
+        np = np or {}
+        art = np.get("art_url") or ""
+        return (np.get("title"), np.get("artist"), np.get("is_playing"),
+                np.get("volume"), np.get("duration_ms"), len(art))
+
     def poll(self):
         # Lightweight: NO logs here (they're large and would cross the bridge
         # every second). The UI fetches logs via get_logs() only on the Log tab.
+        # And only ship now_playing when it actually changed (or every ~5s as a
+        # drift correction) so the heavy cover-art payload doesn't marshal
+        # across the bridge on every 1s tick — that churn is what made the
+        # window randomly stutter / stop responding.
+        np = self.engine.now_playing
+        sig = self._np_sig(np)
+        now = time.time()
+        send = sig != self._np_np_sig or (now - self._np_np_sig_t) > 5
+        if send:
+            self._np_np_sig = sig
+            self._np_np_sig_t = now
         return {
             "running": self.engine.running,
             "mode": self.engine.mode,
             "caps": Engine.capabilities(),
-            "now_playing": self.engine.now_playing,
+            "now_playing": np if send else None,
             "update": self._update_info,
         }
 
@@ -333,7 +361,14 @@ class Api:
         """Lightweight feed for the mini window — just the now-playing data
         (the main poll() also returns logs/state, which is needless traffic
         across a second window's bridge)."""
-        return {"now_playing": self.engine.now_playing}
+        np = self.engine.now_playing
+        sig = self._np_sig(np)
+        now = time.time()
+        send = sig != self._mini_sig or (now - self._mini_sig_t) > 5
+        if send:
+            self._mini_sig = sig
+            self._mini_sig_t = now
+        return {"now_playing": np if send else None}
 
     def open_mini(self):
         # Create the window directly on the GUI thread (NOT a worker thread —
