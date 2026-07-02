@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MediaHotKey Bar</title>
+<link rel="stylesheet" href="fonts.css">
+<style>
+  :root{
+    --paper:#F6EFE1; --card:#FFFDF8; --field-border:#E3D4B6; --panel-border:#E6D8BD;
+    --ink:#574734; --muted:#9a876e; --faint:#b7a384;
+    --terra:#CC7E4F; --terra-top:#E0B254;
+    --ui:'Zen Maru Gothic','Yu Gothic UI','Segoe UI',system-ui,sans-serif;
+    --mono:'JetBrains Mono','Consolas',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{font-family:var(--ui);color:var(--ink);user-select:none;overflow:hidden}
+  /* A single compact strip sized to sit over/above the taskbar. */
+  .strip{display:flex;align-items:center;gap:9px;height:100vh;padding:0 8px 0 8px;
+    background:linear-gradient(120deg,#FBF3E3,#F1E4C8);border:1px solid var(--panel-border);
+    border-radius:10px;position:relative;overflow:hidden}
+  .art{flex:none;width:38px;height:38px;border-radius:8px;border:1px solid var(--panel-border);
+    background-size:cover;background-position:center;background-color:rgba(0,0,0,.05)}
+  .meta{flex:1 1 auto;min-width:0;line-height:1.1}
+  .t{font:700 12.5px var(--ui);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .a{font:500 10.5px var(--ui);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ctrls{flex:none;display:flex;align-items:center;gap:5px}
+  .b{flex:none;width:26px;height:26px;border-radius:50%;background:var(--card);
+    border:1px solid var(--field-border);display:flex;align-items:center;justify-content:center;
+    color:#8a7558;cursor:pointer;font-size:11px}
+  .b.play{width:30px;height:30px;color:#fff;font-size:12px;border:0;
+    background:linear-gradient(135deg,var(--terra-top),var(--terra));
+    box-shadow:0 4px 10px -4px rgba(204,126,79,.6)}
+  .b:active{transform:translateY(1px)}
+  .x{flex:none;color:var(--faint);font-size:12px;cursor:pointer;padding:0 2px;line-height:1}
+  .x:hover{color:var(--terra)}
+  /* Full-width progress hairline pinned to the bottom edge. */
+  .pfill{position:absolute;left:0;bottom:0;height:3px;width:0;
+    background:linear-gradient(90deg,var(--terra-top),var(--terra))}
+  .grip{cursor:move}
+</style>
+</head>
+<body>
+<div class="strip">
+  <div class="art grip pywebview-drag-region" id="art"></div>
+  <div class="meta grip pywebview-drag-region">
+    <div class="t" id="t">—</div>
+    <div class="a" id="a">not playing</div>
+  </div>
+  <div class="ctrls">
+    <div class="b" id="prev" title="Previous">⏮</div>
+    <div class="b play" id="play" title="Play / pause">❚❚</div>
+    <div class="b" id="next" title="Next">⏭</div>
+    <div class="x" id="x" title="Close">✕</div>
+  </div>
+  <div class="pfill" id="fill"></div>
+</div>
+<script src="bar.js"></script>
+</body>
+</html>

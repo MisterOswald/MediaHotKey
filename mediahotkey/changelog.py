@@ -2,6 +2,15 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.26",
+        "notes": [
+            "Added a second, tiny 'Taskbar bar' player — a slim horizontal "
+            "strip (cover, title, prev/play/next) you can drag to hover over "
+            "the Windows taskbar while gaming in windowed mode. Open it from "
+            "the now-playing panel, next to the full Mini player.",
+        ],
+    },
+    {
         "version": "1.0.25",
         "notes": [
             "Fixed now-playing randomly not updating for a while then catching "

@@ -224,7 +224,8 @@ input.field::placeholder { color: #c7b594; }
 .vrange::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px;
   border-radius: 50%; background: var(--terra); border: 2px solid #fff;
   box-shadow: 0 1px 3px rgba(0,0,0,.3); }
-.np-mini { width: 100%; padding: 9px 0; border: 1px solid var(--field-border); border-radius: 10px;
+.np-minis { display: flex; gap: 8px; }
+.np-mini { flex: 1; width: 100%; padding: 9px 0; border: 1px solid var(--field-border); border-radius: 10px;
   background: #F2E9D6; color: #8a7558; font: 600 13.5px var(--ui); cursor: pointer; }
 .np-mini:hover { background: #eaddc0; }
 .np-mini:active { transform: translateY(1px); }

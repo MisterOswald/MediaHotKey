@@ -71,6 +71,7 @@ class Api:
         self._log_lock = threading.Lock()
         self.window = None
         self.mini_window = None
+        self.bar_window = None
         self._allow_close = False
         self._tray = None
         self.engine = Engine(self.config, log=self._log,
@@ -88,8 +89,7 @@ class Api:
         self._np_last_sig_t = 0.0
         self._np_np_sig = None       # poll() de-dupe
         self._np_np_sig_t = 0.0
-        self._mini_sig = None        # poll_np() de-dupe
-        self._mini_sig_t = 0.0
+        self._np_kind_sig = {}       # poll_np() de-dupe, keyed per overlay window
         self._np_last_vol = None
         self._np_last_vol_t = 0.0
         self._np_thread = None
@@ -357,17 +357,19 @@ class Api:
         return {"ok": True}
 
     # -- mini player (separate always-on-top overlay window) --------------
-    def poll_np(self):
-        """Lightweight feed for the mini window — just the now-playing data
-        (the main poll() also returns logs/state, which is needless traffic
-        across a second window's bridge)."""
+    def poll_np(self, kind="mini"):
+        """Lightweight feed for an overlay window (mini / taskbar bar) — just
+        the now-playing data (the main poll() also returns logs/state, which is
+        needless traffic across a second window's bridge). De-duped per window
+        (`kind`) so each window still gets a fresh payload right after it opens,
+        even if the other overlay already advanced the shared state."""
         np = self.engine.now_playing
         sig = self._np_sig(np)
         now = time.time()
-        send = sig != self._mini_sig or (now - self._mini_sig_t) > 5
+        prev_sig, prev_t = self._np_kind_sig.get(kind, (None, 0.0))
+        send = sig != prev_sig or (now - prev_t) > 5
         if send:
-            self._mini_sig = sig
-            self._mini_sig_t = now
+            self._np_kind_sig[kind] = (sig, now)
         return {"now_playing": np if send else None}
 
     def open_mini(self):
@@ -400,6 +402,40 @@ class Api:
         if self.mini_window is not None:
             try:
                 self.mini_window.hide()
+            except Exception:  # noqa: BLE001
+                pass
+        return {"ok": True}
+
+    def open_bar(self):
+        """A tiny horizontal strip (cover + title + prev/play/next) meant to
+        hover over the Windows taskbar while gaming in windowed mode. Same
+        rules as open_mini: created directly on the GUI thread, once."""
+        try:
+            if self.bar_window is None:
+                bar_index = os.path.join(_resource_dir(), "bar.html")
+                self.bar_window = webview.create_window(
+                    "MediaHotKey Bar", url=bar_index, js_api=self,
+                    width=460, height=54, resizable=False, frameless=True,
+                    on_top=True, background_color="#F6EFE1")
+
+                def _closed(*_a):
+                    self.bar_window = None
+                try:
+                    self.bar_window.events.closed += _closed
+                except Exception:  # noqa: BLE001
+                    pass
+            else:
+                self.bar_window.show()
+        except Exception as exc:  # noqa: BLE001
+            self._log(f"[!] taskbar player: {exc}")
+            self.bar_window = None
+            return {"ok": False, "msg": str(exc)}
+        return {"ok": True}
+
+    def close_bar(self):
+        if self.bar_window is not None:
+            try:
+                self.bar_window.hide()
             except Exception:  # noqa: BLE001
                 pass
         return {"ok": True}
@@ -591,12 +627,14 @@ class Api:
                 self._tray.stop()
             except Exception:  # noqa: BLE001
                 pass
-        if self.mini_window is not None:
-            try:
-                self.mini_window.destroy()
-            except Exception:  # noqa: BLE001
-                pass
-            self.mini_window = None
+        for attr in ("mini_window", "bar_window"):
+            win = getattr(self, attr, None)
+            if win is not None:
+                try:
+                    win.destroy()
+                except Exception:  # noqa: BLE001
+                    pass
+                setattr(self, attr, None)
         try:
             self.window.destroy()
         except Exception:  # noqa: BLE001

@@ -72,6 +72,8 @@ const MOCK = {
   poll_np: async () => ({ now_playing: DEMO.now_playing }),
   open_mini: async () => ({ ok: true }),
   close_mini: async () => ({ ok: true }),
+  open_bar: async () => ({ ok: true }),
+  close_bar: async () => ({ ok: true }),
   test_spotify: async () => ({ ok: true, msg: 'Connected to Spotify (nothing playing right now)' }),
   test_discord: async () => ({ ok: true, msg: 'Test message sent. Check your channel.' }),
   record_hotkey: async () => '', open_url: () => {}, choose_mascot: async () => '',
@@ -328,6 +330,11 @@ function wire() {
   $('#btn-mini').onclick = async () => {
     const r = await api().open_mini();
     toast(r && r.ok === false ? (r.msg || 'Mini player failed') : 'Mini player opened');
+  };
+  $('#btn-bar').onclick = async () => {
+    const r = await api().open_bar();
+    toast(r && r.ok === false ? (r.msg || 'Taskbar bar failed')
+                              : 'Taskbar bar opened — drag it over your taskbar');
   };
 
   $('#btn-check-update').onclick = async () => {
