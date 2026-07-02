@@ -1,6 +1,6 @@
 /* MediaHotKey taskbar bar — a tiny horizontal strip meant to hover over the
    Windows taskbar while gaming in windowed mode. Shares the main Api bridge
-   and the lightweight poll_np() feed (de-duped per window as 'bar'). */
+   and the lightweight arg-less poll_np() feed. */
 
 const $ = (s) => document.getElementById(s);
 function ready() {
@@ -40,7 +40,7 @@ async function poll() {
   // now_playing is null when unchanged — keep the current one so the big cover
   // payload isn't re-sent every second.
   try {
-    const np = (await api().poll_np('bar')).now_playing;
+    const np = (await api().poll_np()).now_playing;
     if (np) render(np);
   } catch (e) { /* closing */ }
 }

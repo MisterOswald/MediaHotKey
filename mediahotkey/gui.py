@@ -89,7 +89,6 @@ class Api:
         self._np_last_sig_t = 0.0
         self._np_np_sig = None       # poll() de-dupe
         self._np_np_sig_t = 0.0
-        self._np_kind_sig = {}       # poll_np() de-dupe, keyed per overlay window
         self._np_last_vol = None
         self._np_last_vol_t = 0.0
         self._np_thread = None
@@ -357,20 +356,17 @@ class Api:
         return {"ok": True}
 
     # -- mini player (separate always-on-top overlay window) --------------
-    def poll_np(self, kind="mini"):
+    def poll_np(self):
         """Lightweight feed for an overlay window (mini / taskbar bar) — just
         the now-playing data (the main poll() also returns logs/state, which is
-        needless traffic across a second window's bridge). De-duped per window
-        (`kind`) so each window still gets a fresh payload right after it opens,
-        even if the other overlay already advanced the shared state."""
-        np = self.engine.now_playing
-        sig = self._np_sig(np)
-        now = time.time()
-        prev_sig, prev_t = self._np_kind_sig.get(kind, (None, 0.0))
-        send = sig != prev_sig or (now - prev_t) > 5
-        if send:
-            self._np_kind_sig[kind] = (sig, now)
-        return {"now_playing": np if send else None}
+        needless traffic across a second window's bridge).
+
+        NOTE: takes NO arguments on purpose. A secondary pywebview window
+        calling a js_api method WITH an argument on a repeating timer wedges the
+        shared bridge (both windows go 'Not Responding'), so overlays call this
+        arg-less and we just hand back the current now-playing every tick — the
+        overlay is short-lived, so the extra traffic is negligible."""
+        return {"now_playing": self.engine.now_playing}
 
     def open_mini(self):
         # Create the window directly on the GUI thread (NOT a worker thread —

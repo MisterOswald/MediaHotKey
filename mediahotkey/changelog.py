@@ -2,6 +2,16 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.27",
+        "notes": [
+            "Fixed the app going 'Not Responding' after opening the Taskbar "
+            "bar (and the Mini player) — a background call the overlay windows "
+            "made every second was passing an argument across the bridge, "
+            "which wedged it. The overlays now use the original arg-less feed, "
+            "so both float smoothly again without freezing the main window.",
+        ],
+    },
+    {
         "version": "1.0.26",
         "notes": [
             "Added a second, tiny 'Taskbar bar' player — a slim horizontal "
