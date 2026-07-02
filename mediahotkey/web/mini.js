@@ -1,10 +1,13 @@
 /* MediaHotKey mini player — separate window sharing the main Api bridge.
-   Uses the lightweight poll_np() (just now-playing) to keep bridge traffic low. */
+   IMPORTANT: this window must NOT poll the Python bridge on a timer. Two
+   pywebview windows both calling js_api every second saturates/deadlocks the
+   shared GUI-thread bridge and freezes the whole app. Instead, the main app
+   PUSHES now-playing into window.mhkRender() via evaluate_js; we only call
+   js_api for the (rare, user-initiated) button clicks. */
 
 const $ = (s) => document.getElementById(s);
 function ready() {
-  return !!(window.pywebview && window.pywebview.api &&
-            typeof window.pywebview.api.poll_np === 'function');
+  return !!(window.pywebview && window.pywebview.api);
 }
 const api = () => window.pywebview.api;
 
@@ -49,14 +52,9 @@ function tick() {
 }
 setInterval(tick, 500);
 
-async function poll() {
-  // now_playing is null when unchanged — keep the current one (tick() keeps the
-  // bar moving) so the big cover payload isn't re-sent every second.
-  try {
-    const np = (await api().poll_np()).now_playing;
-    if (np) render(np);
-  } catch (e) { /* closing */ }
-}
+// The main app pushes now-playing here (Python -> JS via evaluate_js). Exposed
+// immediately so pushes land even before the bridge finishes attaching.
+window.mhkRender = render;
 
 function wire() {
   $('prev').onclick = () => api().transport('prev');
@@ -74,7 +72,7 @@ function wire() {
   $('x').onclick = () => api().close_mini();
 }
 
-function boot() { wire(); setInterval(poll, 1000); poll(); }
+function boot() { wire(); }
 
 (function waitReady() {
   if (ready()) return boot();

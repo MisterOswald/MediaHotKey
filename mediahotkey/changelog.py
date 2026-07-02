@@ -2,6 +2,17 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.28",
+        "notes": [
+            "Really fixed the overlay freeze this time — the Mini player and "
+            "Taskbar bar no longer call back into the app every second. Two "
+            "windows both polling the shared bridge is what deadlocked it "
+            "('Not Responding'). The main app now pushes now-playing into the "
+            "overlays instead, so they update live without ever wedging the "
+            "window. Buttons still work as before.",
+        ],
+    },
+    {
         "version": "1.0.27",
         "notes": [
             "Fixed the app going 'Not Responding' after opening the Taskbar "

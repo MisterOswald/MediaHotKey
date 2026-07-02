@@ -10,6 +10,7 @@ and now-playing state back to the UI.
 import os
 import sys
 import time
+import json
 import base64
 import threading
 import collections
@@ -89,6 +90,8 @@ class Api:
         self._np_last_sig_t = 0.0
         self._np_np_sig = None       # poll() de-dupe
         self._np_np_sig_t = 0.0
+        self._overlay_sig = None     # _push_overlays() de-dupe
+        self._overlay_sig_t = 0.0
         self._np_last_vol = None
         self._np_last_vol_t = 0.0
         self._np_thread = None
@@ -181,7 +184,38 @@ class Api:
                     last = dict(self.engine.now_playing)
                     last["is_playing"] = False
                     self.engine.now_playing = last
+            # Push to any open overlay (mini / taskbar bar). The overlays do
+            # NOT poll our js_api — a 2nd pywebview window calling back into
+            # Python every second saturates the shared GUI-thread bridge and
+            # freezes the whole app. Pushing one-way (Python -> JS) avoids that.
+            self._push_overlays(self.engine.now_playing)
             self._np_stop.wait(1.0)
+
+    def _push_overlays(self, np):
+        """Send now-playing to each open overlay window via evaluate_js. One
+        directional (Python -> JS), so it never adds to the JS->Python bridge
+        traffic that deadlocks multiple windows. De-duped (only pushed when the
+        track/state changes, or every ~5s) so the large cover-art payload isn't
+        re-marshalled every second."""
+        if self.mini_window is None and self.bar_window is None:
+            return
+        sig = self._np_sig(np)
+        now = time.time()
+        if sig == self._overlay_sig and (now - self._overlay_sig_t) < 5:
+            return
+        self._overlay_sig = sig
+        self._overlay_sig_t = now
+        try:
+            payload = json.dumps(np or {})
+        except Exception:  # noqa: BLE001
+            return
+        for win in (self.mini_window, self.bar_window):
+            if win is None:
+                continue
+            try:
+                win.evaluate_js(f"window.mhkRender && window.mhkRender({payload})")
+            except Exception:  # noqa: BLE001
+                pass
 
     # -- config -----------------------------------------------------------
     def _apply(self, cfg):
@@ -392,6 +426,7 @@ class Api:
             self._log(f"[!] mini player: {exc}")
             self.mini_window = None
             return {"ok": False, "msg": str(exc)}
+        self._overlay_sig = None   # force an immediate now-playing push
         return {"ok": True}
 
     def close_mini(self):
@@ -426,6 +461,7 @@ class Api:
             self._log(f"[!] taskbar player: {exc}")
             self.bar_window = None
             return {"ok": False, "msg": str(exc)}
+        self._overlay_sig = None   # force an immediate now-playing push
         return {"ok": True}
 
     def close_bar(self):
