@@ -2,6 +2,21 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.29",
+        "notes": [
+            "Much faster startup: the .exe no longer bundles the entire "
+            "Windows SDK — only the two pieces the app actually uses. The "
+            "one-file exe unpacks itself (and gets antivirus-scanned) on every "
+            "launch, and that payload was most of the wait.",
+            "More launch trims: the system-tray library now loads on first "
+            "use instead of at startup, and update-leftover cleanup runs "
+            "after the window is up instead of before it.",
+            "The Log tab now shows a '[start] …' line breaking down where "
+            "launch time went (exe unpack / imports / window+page) — if it's "
+            "ever slow again, that line says exactly why.",
+        ],
+    },
+    {
         "version": "1.0.28",
         "notes": [
             "Really fixed the overlay freeze this time — the Mini player and "

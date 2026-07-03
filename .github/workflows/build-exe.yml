@@ -47,7 +47,10 @@ jobs:
           --add-data "mediahotkey/web;mediahotkey/web"
           --add-data "assets/icon.ico;assets"
           --collect-all webview
-          --collect-all winsdk
+          --hidden-import winsdk.windows.media.control
+          --hidden-import winsdk.windows.storage.streams
+          --hidden-import winsdk.windows.foundation
+          --hidden-import winsdk.windows.foundation.collections
           --collect-all pycaw
           --collect-all comtypes
           --exclude-module tkinter

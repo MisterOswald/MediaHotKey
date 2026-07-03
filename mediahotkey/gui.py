@@ -15,6 +15,10 @@ import base64
 import threading
 import collections
 
+# Startup timing: stamp before/after the heavy imports below so the Log tab can
+# show where launch time actually goes ("[start] …").
+_T_START = time.time()
+
 try:
     import webview
 except Exception:  # noqa: BLE001
@@ -29,14 +33,24 @@ from .discord_notify import Discord
 if KEYBOARD_AVAILABLE:
     import keyboard
 
+_T_IMPORTS = time.time()
+
 # Optional system-tray support (keeps hotkeys alive after closing the window).
-try:
-    import pystray
-    from PIL import Image
-    _TRAY = True
-except Exception:  # noqa: BLE001
-    pystray = None
-    _TRAY = False
+# pystray pulls in PIL, which is slow enough to matter at launch — load it
+# lazily on first use (first hide-to-tray / minimized start) instead.
+_TRAY_MODS = None  # None = not tried; {} = tried and unavailable; dict = loaded
+
+
+def _tray_mods():
+    global _TRAY_MODS
+    if _TRAY_MODS is None:
+        try:
+            import pystray
+            from PIL import Image
+            _TRAY_MODS = {"pystray": pystray, "Image": Image}
+        except Exception:  # noqa: BLE001
+            _TRAY_MODS = {}
+    return _TRAY_MODS or None
 
 
 def _resource_dir():
@@ -585,7 +599,7 @@ class Api:
         try:
             if self._allow_close:
                 return True
-            if not _TRAY:
+            if _tray_mods() is None:
                 self._allow_close = True
                 self._np_stop.set()
                 try:
@@ -618,8 +632,10 @@ class Api:
             pass
 
     def _ensure_tray(self):
-        if not _TRAY or self._tray is not None:
+        mods = _tray_mods()
+        if mods is None or self._tray is not None:
             return
+        pystray, Image = mods["pystray"], mods["Image"]
         icon_img = None
         path = _icon_path()
         if path:
@@ -809,16 +825,12 @@ def main():
             "--disable-features=msSmartScreenProtection,EdgeCollections,"
             "msWebOOUI,msPdfOOUI")
 
-    # Clean up any leftovers from a previous self-update (e.g. the old exe).
-    try:
-        updater.cleanup_stale()
-    except Exception:  # noqa: BLE001
-        pass
-
     api = Api()
     index = os.path.join(_resource_dir(), "index.html")
     settings = api.config["settings"]
-    start_hidden = bool(_TRAY and settings.get("start_minimized"))
+    # Optimistic — the tray import is deferred to _post_init (worker thread);
+    # if it turns out to be unavailable there, the window is simply shown.
+    start_hidden = bool(settings.get("start_minimized"))
 
     # Create the window NORMALLY (never hidden at creation) — a hidden WebView2
     # window can stall its own initialization on a cold start and wedge the main
@@ -836,6 +848,7 @@ def main():
         background_color="#F6EFE1",
     )
     api.window = window
+    t_window = time.time()
 
     # Closing the X hides to the tray (hotkeys keep running) instead of quitting.
     try:
@@ -845,6 +858,26 @@ def main():
 
     api._did_init = False
     init_lock = threading.Lock()
+
+    def _log_startup_timing():
+        """One '[start] …' line in the Log tab showing where launch time went,
+        so slow-startup reports come with real numbers instead of guesses."""
+        try:
+            parts = []
+            if getattr(sys, "_MEIPASS", None):
+                # The onefile bootloader creates _MEI… right when it starts
+                # extracting, so its ctime approximates "double-click time".
+                try:
+                    unpack = _T_START - os.path.getctime(sys._MEIPASS)
+                    if 0 < unpack < 600:
+                        parts.append(f"exe unpack ~{unpack:.1f}s")
+                except OSError:
+                    pass
+            parts.append(f"imports {_T_IMPORTS - _T_START:.1f}s")
+            parts.append(f"window+page {time.time() - t_window:.1f}s")
+            api._log("[start] " + " · ".join(parts))
+        except Exception:  # noqa: BLE001
+            pass
 
     def _post_init():
         # IMPORTANT: this must never run on the main GUI thread. The
@@ -857,16 +890,26 @@ def main():
             if api._did_init:
                 return
             api._did_init = True
+        _log_startup_timing()
         # Hide to tray FIRST so the window doesn't linger on screen while the
-        # rest of init runs.
+        # rest of init runs. (The tray import is lazy — if it fails, just keep
+        # the window visible instead.)
         if start_hidden:
             api._ensure_tray()
-            try:
-                api.window.hide()
-            except Exception:  # noqa: BLE001
-                pass
-            api._log("[i] started minimized to the system tray.")
+            if api._tray is not None:
+                try:
+                    api.window.hide()
+                except Exception:  # noqa: BLE001
+                    pass
+                api._log("[i] started minimized to the system tray.")
         _apply_window_icon()
+        # Clean up any leftovers from a previous self-update (e.g. the old exe).
+        # Runs here (worker thread, post-load) instead of before the window so
+        # file I/O can't delay the launch.
+        try:
+            updater.cleanup_stale()
+        except Exception:  # noqa: BLE001
+            pass
         if settings.get("start_engine_on_launch"):
             try:
                 api.engine.start()
