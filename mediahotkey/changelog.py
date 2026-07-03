@@ -2,6 +2,20 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.37",
+        "notes": [
+            "Discord posts going quiet is no longer silent: the background "
+            "poster now logs WHY it can't post (most commonly 'Spotify isn't "
+            "authorized — Test / Authorize') instead of failing invisibly "
+            "every few seconds.",
+            "Volume buttons/slider no longer fail silently either: every "
+            "volume change logs what it did ('[ok] Spotify volume 45%' / "
+            "'[ok] app volume 60%') or exactly why it couldn't — including "
+            "when Spotify's playback device refuses app volume control, and "
+            "when no app audio session matches the Media app hint.",
+        ],
+    },
+    {
         "version": "1.0.36",
         "notes": [
             "Fixed everything Spotify dying mid-session (stale panel, skip "

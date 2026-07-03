@@ -527,13 +527,30 @@ class Engine:
         sp = self._ensure_spotify()
         sp.volume(max(0, min(100, int(percent))))
 
+    def _spotify_volume_route(self):
+        """Whether volume should go through the Spotify Web API right now."""
+        return (self._is_spotify_now() and SPOTIPY_AVAILABLE
+                and self.config["spotify"].get("client_id")
+                and os.path.exists(token_cache_path()))
+
+    def _log_spotify_volume_fail(self, exc):
+        """Volume changes are user-initiated — say what failed and where the
+        control goes instead; a silent fallback feels like a dead button."""
+        if isinstance(exc, SpotifyNotAuthorized):
+            self.log("[!] Spotify volume needs authorization (Spotify tab → "
+                     "Test / Authorize) — trying the app mixer instead.")
+        elif "VOLUME_CONTROL" in str(exc).upper():
+            self.log("[!] Spotify says this playback device doesn't allow "
+                     "volume control from apps — trying the app mixer instead.")
+        else:
+            self.log(f"[!] Spotify volume failed ({type(exc).__name__}: {exc}) "
+                     "— trying the app mixer instead.")
+
     def volume(self, delta):
         """Nudge volume by `delta`% — Spotify Web API for a Spotify track,
         otherwise the app's own volume, else system media keys."""
         def go():
-            if (self._is_spotify_now() and SPOTIPY_AVAILABLE
-                    and self.config["spotify"].get("client_id")
-                    and os.path.exists(token_cache_path())):
+            if self._spotify_volume_route():
                 try:
                     pb = self._ensure_spotify().current_playback()
                     vol = ((pb or {}).get("device") or {}).get("volume_percent")
@@ -543,11 +560,14 @@ class Engine:
                         self.now_playing["volume"] = newv   # reflect instantly
                         self.log(f"[ok] Spotify volume {newv}%")
                         return
-                except Exception:  # noqa: BLE001
-                    pass
+                    self.log("[!] Spotify reports no volume for the active "
+                             "device — trying the app mixer instead.")
+                except Exception as exc:  # noqa: BLE001
+                    self._log_spotify_volume_fail(exc)
             lvl = self._pycaw_volume_op(self._hint(), "add", delta / 100.0)
             if lvl is not None:
                 self.now_playing["volume"] = int(round(lvl * 100))
+                self.log(f"[ok] app volume {int(round(lvl * 100))}%")
                 return
             if KEYBOARD_AVAILABLE:
                 key = "volume up" if delta > 0 else "volume down"
@@ -556,6 +576,7 @@ class Engine:
                         keyboard.send(key)
                     except Exception:  # noqa: BLE001
                         break
+                self.log("[ok] sent system volume keys")
             else:
                 self.notify_text("⚠️ volume: no control method available", "error")
         self._run_async(lambda: self._safe(go, "volume"))
@@ -564,18 +585,22 @@ class Engine:
         """Set an absolute volume level (0-100) from the UI slider."""
         percent = max(0, min(100, int(percent)))
         def go():
-            if (self._is_spotify_now() and SPOTIPY_AVAILABLE
-                    and self.config["spotify"].get("client_id")
-                    and os.path.exists(token_cache_path())):
+            if self._spotify_volume_route():
                 try:
                     self._spotify_set_volume(percent)
                     self.now_playing["volume"] = percent   # reflect instantly
+                    self.log(f"[ok] Spotify volume {percent}%")
                     return
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    self._log_spotify_volume_fail(exc)
             lvl = self._pycaw_volume_op(self._hint(), "set", percent / 100.0)
             if lvl is not None:
                 self.now_playing["volume"] = int(round(lvl * 100))
+                self.log(f"[ok] app volume {int(round(lvl * 100))}%")
+            else:
+                self.log("[!] volume: no audio session found to control — set "
+                         "the Media app hint (General tab) to your browser, "
+                         "e.g. 'brave' or 'chrome'.")
         self._run_async(lambda: self._safe(go, "set volume"))
 
     # ------------------------------------------------------- media (SMTC)
@@ -1042,6 +1067,20 @@ class Engine:
                         and exc.http_status == 429):
                     self.log("[!] poller rate limited — backing off")
                     self._stop_event.wait(interval * 4)
+                else:
+                    # The poller is what posts now-playing to Discord — its
+                    # failures must be visible (throttled) or the webhook just
+                    # "stops working" with an empty log.
+                    now = time.time()
+                    if now - getattr(self, "_poll_err_t", 0) > 300:
+                        self._poll_err_t = now
+                        if isinstance(exc, SpotifyNotAuthorized):
+                            self.log("[!] Discord now-playing posts are OFF: "
+                                     "Spotify isn't authorized — Spotify tab → "
+                                     "Test / Authorize.")
+                        else:
+                            self.log(f"[!] now-playing poller error: "
+                                     f"{type(exc).__name__}: {exc}")
 
     # ------------------------------------------------------------- lifecycle
     @property
