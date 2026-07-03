@@ -96,6 +96,48 @@ def _check_spotify_creds(cid, secret):
         return None
 
 
+def _wait_for_auth_code(port, timeout=120):
+    """Serve 127.0.0.1:<port> until Spotify's approval redirect arrives (or the
+    timeout passes). Returns (code, error): code on success, error string when
+    Spotify redirected back with ?error=..., (None, None) on timeout. Handles
+    stray requests (favicon etc.) without eating the real redirect."""
+    import http.server
+    import urllib.parse
+    box = {}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            code = (q.get("code") or [None])[0]
+            error = (q.get("error") or [None])[0]
+            if code or error:
+                box["code"], box["error"] = code, error
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                msg = ("✅ Signed in — you can close this tab and go back to "
+                       "MediaHotKey." if code else
+                       f"✗ Sign-in failed: {error}. Go back to MediaHotKey.")
+                self.wfile.write(
+                    f"<h2 style='font-family:sans-serif'>{msg}</h2>".encode())
+            else:
+                self.send_response(204)   # favicon & friends — keep waiting
+                self.end_headers()
+
+        def log_message(self, *_a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", int(port)), Handler)
+    srv.timeout = 5
+    deadline = time.time() + timeout
+    try:
+        while time.time() < deadline and "code" not in box:
+            srv.handle_request()
+    finally:
+        srv.server_close()
+    return box.get("code"), box.get("error")
+
+
 def _port_in_use(port):
     """True if nothing can listen on 127.0.0.1:<port> (someone's bound to it)."""
     import socket
@@ -560,12 +602,41 @@ class Api:
                     os.remove(token_cache_path())
                 except OSError:
                     pass
-                uri = spec.get("redirect_uri") or "http://127.0.0.1:8888/callback"
-                self._log("[i] opening the Spotify sign-in in your browser… If "
-                          "the tab shows 'Invalid redirect URI', add exactly "
-                          f"{uri} under Redirect URIs in your Spotify app's "
-                          "settings and save.")
-                probe._ensure_spotify(interactive=True)
+                # Run the approval step OURSELVES (never spotipy's silent
+                # blocking flow): log the sign-in link (so it can be opened
+                # manually if no tab appears), open the browser, and wait on
+                # our own tiny redirect server with a hard time limit.
+                auth = probe._build_auth()
+                url = auth.get_authorize_url()
+                self._log(f"[i] Spotify sign-in link (if no tab opens, copy "
+                          f"this into your browser): {url}")
+                opened = False
+                try:
+                    import webbrowser
+                    opened = bool(webbrowser.open(url))
+                except Exception:  # noqa: BLE001
+                    opened = False
+                self._log(f"[i] browser tab opened: {'yes' if opened else 'NO'} "
+                          "— waiting up to 2 minutes for you to approve…")
+                code, err = _wait_for_auth_code(port, timeout=120)
+                if err:
+                    return {"ok": False, "msg":
+                            f"Spotify said no: {err}. If it mentions the "
+                            "redirect URI, add exactly "
+                            f"{spec.get('redirect_uri') or 'http://127.0.0.1:8888/callback'} "
+                            "under Redirect URIs in your Spotify app's settings."}
+                if not code:
+                    return {"ok": False, "msg":
+                            "No approval arrived within 2 minutes. If no "
+                            "browser tab opened, copy the sign-in link from "
+                            "the Log tab into any browser. If the tab showed "
+                            "an error, fix the Redirect URI in your Spotify "
+                            "app settings (must be exactly "
+                            f"{spec.get('redirect_uri') or 'http://127.0.0.1:8888/callback'})."}
+                auth.get_access_token(code, as_dict=False)   # writes the cache
+                self._log("[i] Spotify sign-in completed. ✅")
+                probe._sp = None
+                probe._ensure_spotify()          # now uses the fresh cache
             pb = probe._current()
             if pb and pb.get("item"):
                 return {"ok": True, "msg": f"Connected — now playing: {pb['item']['name']}"}

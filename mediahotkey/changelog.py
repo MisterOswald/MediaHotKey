@@ -2,6 +2,21 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.32",
+        "notes": [
+            "Rebuilt the Spotify sign-in so it can no longer hang silently on "
+            "'Authorizing…'. The app now runs the approval step itself: it "
+            "logs the sign-in link (copy it from the Log tab into any browser "
+            "if no tab opens), waits up to 2 minutes, shows a clear ✅/✗ page "
+            "in the browser tab, and reports exactly what failed — including "
+            "Spotify's own error when the Redirect URI is wrong.",
+            "When Windows reports a music session without any track info "
+            "(hotkeys control it, but some Spotify builds publish no "
+            "title/artist), the Log now explains that the panel needs the "
+            "Spotify Web API — instead of silently showing 'not playing'.",
+        ],
+    },
+    {
         "version": "1.0.31",
         "notes": [
             "Fixed the now-playing panel staying on 'not playing' while music "

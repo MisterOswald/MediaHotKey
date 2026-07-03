@@ -195,44 +195,44 @@ class Engine:
         }
 
     # ------------------------------------------------------------- spotify
-    def _ensure_spotify(self, interactive=False):
-        """Build the Spotify client on first use.
-
-        interactive=False (the default — hotkeys, the now-playing watcher,
-        volume): only a cached/refreshable sign-in is accepted. It must NEVER
-        fall into spotipy's interactive browser flow, which blocks the calling
-        thread forever on a local-redirect socket. When the cached sign-in is
-        missing or can't be refreshed (e.g. the client secret was regenerated),
-        raise SpotifyNotAuthorized instead — callers report it and move on.
-
-        interactive=True (the Spotify tab's Test/Authorize button only): allowed
-        to open the browser sign-in."""
-        if self._sp is not None:
-            return self._sp
+    def _build_auth(self):
+        """The SpotifyOAuth used everywhere. open_browser=False on purpose:
+        NOTHING may fall into spotipy's built-in interactive flow (it blocks
+        forever on a local socket with no diagnostics) — the app runs the
+        approval step itself in the Spotify tab's Test/Authorize."""
         if not SPOTIPY_AVAILABLE:
             raise RuntimeError("spotipy not installed — run: pip install spotipy")
         spec = self.config["spotify"]
         if not spec.get("client_id") or not spec.get("client_secret"):
             raise RuntimeError("Spotify Client ID / Secret not set — open Settings.")
-        auth = SpotifyOAuth(
+        return SpotifyOAuth(
             client_id=spec["client_id"],
             client_secret=spec["client_secret"],
             redirect_uri=spec.get("redirect_uri", "http://127.0.0.1:8888/callback"),
             scope=SCOPE,
             cache_path=token_cache_path(),
-            open_browser=True,
+            open_browser=False,
             requests_timeout=SPOTIFY_TIMEOUT,   # token refresh must not stall
         )
-        if not interactive:
+
+    def _ensure_spotify(self):
+        """Build the Spotify client on first use. Only a cached/refreshable
+        sign-in is accepted — when it's missing or can't be refreshed (e.g. the
+        client secret was regenerated), raise SpotifyNotAuthorized; callers
+        report it and move on. The interactive sign-in lives in the UI's
+        Test/Authorize flow exclusively."""
+        if self._sp is not None:
+            return self._sp
+        auth = self._build_auth()
+        token = None
+        try:
+            token = auth.validate_token(auth.cache_handler.get_cached_token())
+        except Exception:  # noqa: BLE001 — unrefreshable/corrupt cache
             token = None
-            try:
-                token = auth.validate_token(auth.cache_handler.get_cached_token())
-            except Exception:  # noqa: BLE001 — unrefreshable/corrupt cache
-                token = None
-            if not token:
-                raise SpotifyNotAuthorized(
-                    "Spotify isn't authorized — open the Spotify tab and click "
-                    "Test / Authorize.")
+        if not token:
+            raise SpotifyNotAuthorized(
+                "Spotify isn't authorized — open the Spotify tab and click "
+                "Test / Authorize.")
         self._sp = spotipy.Spotify(
             requests_session=_build_session(),
             requests_timeout=SPOTIFY_TIMEOUT,
@@ -712,11 +712,15 @@ class Engine:
         try:
             props = await session.try_get_media_properties_async()
         except Exception as exc:  # noqa: BLE001
-            self._dbg("smtc", f"media properties failed for {aumid}: {exc}")
+            self._smtc_no_props(aumid, f"reading track info failed: {exc}")
             return None
         title = (props.title or "").strip()
         artist = (props.artist or "").strip()
         if not title and not artist:
+            # A live session with EMPTY metadata is the anomaly worth logging
+            # (some Spotify builds do this) — plain "no session" is just
+            # nothing playing and stays quiet.
+            self._smtc_no_props(aumid, "session has no title/artist")
             return None
 
         is_playing = False
@@ -768,6 +772,17 @@ class Engine:
         async def _guarded():
             return await asyncio.wait_for(coro, timeout)
         return asyncio.run(_guarded())
+
+    def _smtc_no_props(self, aumid, why):
+        """Log (throttled) a media session that exists but yields no track
+        info — the panel would otherwise just sit on 'not playing' with no
+        explanation while hotkey control clearly works."""
+        now = time.time()
+        if now - getattr(self, "_smtc_noprops_t", 0) > 60:
+            self._smtc_noprops_t = now
+            self.log(f"[i] media session '{aumid}' found but {why} — the panel "
+                     "needs the Spotify Web API for track info (authorize on "
+                     "the Spotify tab).")
 
     def read_media_now_playing(self):
         try:
