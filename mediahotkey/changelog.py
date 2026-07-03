@@ -2,6 +2,18 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.34",
+        "notes": [
+            "Fixed 'not playing' while Spotify plays a MUSIC VIDEO (or an ad): "
+            "Spotify exposes no track details for those, and the panel treated "
+            "'no details' as 'nothing playing'. It now shows a live 'Playing "
+            "on Spotify (no track info)' card with the play state — and "
+            "regular songs keep showing full title/art as before.",
+            "Podcast episodes now show properly in the panel too (episode "
+            "name, show name and cover) instead of appearing as nothing.",
+        ],
+    },
+    {
         "version": "1.0.33",
         "notes": [
             "Fixed the now-playing panel freezing on the previous song (stuck "

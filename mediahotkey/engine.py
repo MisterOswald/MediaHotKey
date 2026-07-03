@@ -716,12 +716,6 @@ class Engine:
             return None
         title = (props.title or "").strip()
         artist = (props.artist or "").strip()
-        if not title and not artist:
-            # A live session with EMPTY metadata is the anomaly worth logging
-            # (some Spotify builds do this) — plain "no session" is just
-            # nothing playing and stays quiet.
-            self._smtc_no_props(aumid, "session has no title/artist")
-            return None
 
         is_playing = False
         try:
@@ -738,6 +732,23 @@ class Engine:
             duration_ms = int(max(0, span) * 1000)
         except Exception:  # noqa: BLE001
             pass
+
+        if not title and not artist:
+            # A live session with EMPTY metadata (Spotify hides it for music
+            # videos, for example). Worth logging — and when it's actually
+            # PLAYING, show a generic live card rather than 'not playing'.
+            self._smtc_no_props(aumid, "session has no title/artist")
+            if not is_playing:
+                return None
+            app_label = ("Spotify" if "spotify" in aumid.lower()
+                         else (aumid or "media app"))
+            return {
+                "title": f"Playing on {app_label} (no track info)",
+                "artist": "", "art_url": None,
+                "progress_ms": progress_ms, "duration_ms": duration_ms,
+                "is_playing": True, "source": "media", "app": aumid.lower(),
+                "fetched_at": int(time.time() * 1000),
+            }
 
         # Only cache a *successful* cover so a transient thumbnail failure can
         # heal on the next read instead of sticking as "no art" forever.
@@ -843,32 +854,58 @@ class Engine:
         self._run_async(lambda: self._safe(go, f"transport {action}"))
 
     def read_spotify_now_playing(self):
-        """Now-playing via the Spotify Web API (covers remote devices)."""
+        """Now-playing via the Spotify Web API (covers remote devices).
+
+        Handles every content type Spotify can play, not just plain tracks:
+        podcast episodes (additional_types) get full info, and content the API
+        exposes NO details for — music videos, ads, some local files come back
+        with item=null while clearly playing — gets a live generic card instead
+        of the panel pretending nothing is playing."""
         try:
-            pb = self._current()
+            sp = self._ensure_spotify()
+            pb = sp.current_playback(additional_types="episode")
         except Exception as exc:  # noqa: BLE001
             self._dbg("spotify", f"web api error: {exc}")
             return None
-        if not pb or not pb.get("item"):
+        if not pb:
             self._dbg("spotify", "web api: nothing playing")
             return None
-        track = pb["item"]
-        album = track.get("album", {})
-        images = album.get("images", [])
-        self._dbg("spotify", f"title={track.get('name')!r} "
-                             f"art={'yes' if images else 'no'} "
-                             f"playing={pb.get('is_playing')}")
-        return {
-            "title": track.get("name"),
-            "artist": ", ".join(a["name"] for a in track.get("artists", [])),
-            "art_url": images[0]["url"] if images else None,
+        base = {
             "progress_ms": pb.get("progress_ms") or 0,
-            "duration_ms": track.get("duration_ms") or 0,
             "is_playing": pb.get("is_playing", False),
             "source": "spotify",
             "volume": (pb.get("device") or {}).get("volume_percent"),
             "fetched_at": int(time.time() * 1000),
         }
+        item = pb.get("item")
+        if item and item.get("type") == "episode":
+            show = item.get("show") or {}
+            images = item.get("images") or show.get("images") or []
+            return dict(base,
+                        title=item.get("name"),
+                        artist=show.get("name") or show.get("publisher") or "Podcast",
+                        art_url=images[0]["url"] if images else None,
+                        duration_ms=item.get("duration_ms") or 0)
+        if item:
+            album = item.get("album", {})
+            images = album.get("images", [])
+            self._dbg("spotify", f"title={item.get('name')!r} "
+                                 f"art={'yes' if images else 'no'} "
+                                 f"playing={pb.get('is_playing')}")
+            return dict(base,
+                        title=item.get("name"),
+                        artist=", ".join(a["name"] for a in item.get("artists", [])),
+                        art_url=images[0]["url"] if images else None,
+                        duration_ms=item.get("duration_ms") or 0)
+        # item is null: Spotify is playing something it won't describe.
+        if not base["is_playing"] and not base["progress_ms"]:
+            return None
+        cpt = pb.get("currently_playing_type") or "unknown"
+        title = ("Ad break" if cpt == "ad"
+                 else "Playing on Spotify (no track info — e.g. a music video)")
+        return dict(base, title=title,
+                    artist=self._device_name(pb) or "Spotify",
+                    art_url=None, duration_ms=0)
 
     def media_control(self, action, label):
         def go():
