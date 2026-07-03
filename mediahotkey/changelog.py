@@ -2,6 +2,19 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.36",
+        "notes": [
+            "Fixed everything Spotify dying mid-session (stale panel, skip "
+            "hotkey doing nothing, Discord posts stopping) with 'input(): "
+            "lost sys.stdin' in the Log: when the sign-in token expired and "
+            "its refresh failed, the Spotify library tried to ask for console "
+            "input — impossible in a windowed app — and every Spotify call "
+            "crashed until restart. It can no longer prompt: an expired/"
+            "revoked sign-in now shows a clear 'click Test / Authorize' "
+            "message in the Log and recovers the moment you re-authorize.",
+        ],
+    },
+    {
         "version": "1.0.35",
         "notes": [
             "Now-playing works with the Spotify WEB PLAYER (open.spotify.com "

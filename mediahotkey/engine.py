@@ -93,6 +93,23 @@ class SpotifyNotAuthorized(RuntimeError):
     """No cached Spotify sign-in usable from background code — the user needs
     to click Test / Authorize on the Spotify tab (the only interactive path)."""
 
+
+if SPOTIPY_AVAILABLE:
+    class _NonInteractiveOAuth(SpotifyOAuth):
+        """SpotifyOAuth that can NEVER prompt. spotipy's get_access_token falls
+        back to an interactive flow (browser + console input()) whenever the
+        cached token is missing or its refresh fails — in the windowed exe that
+        surfaces as 'RuntimeError: input(): lost sys.stdin' and silently killed
+        every Spotify feature until restart. Raising instead makes the failure
+        loud, recoverable and actionable (re-run Test / Authorize)."""
+
+        def get_auth_response(self, *_a, **_k):
+            raise SpotifyNotAuthorized(
+                "Spotify sign-in expired or was revoked — open the Spotify "
+                "tab and click Test / Authorize to sign in again.")
+else:
+    _NonInteractiveOAuth = None
+
 # Hard cap on any single Spotify Web API request. Without this, spotipy uses no
 # timeout, so a slow/stalled network call blocks the now-playing thread — the
 # panel stops updating until the socket finally returns ("loads after a while").
@@ -205,7 +222,7 @@ class Engine:
         spec = self.config["spotify"]
         if not spec.get("client_id") or not spec.get("client_secret"):
             raise RuntimeError("Spotify Client ID / Secret not set — open Settings.")
-        return SpotifyOAuth(
+        return _NonInteractiveOAuth(
             client_id=spec["client_id"],
             client_secret=spec["client_secret"],
             redirect_uri=spec.get("redirect_uri", "http://127.0.0.1:8888/callback"),
