@@ -2,6 +2,22 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.33",
+        "notes": [
+            "Fixed the now-playing panel freezing on the previous song (stuck "
+            "time/cover) once an overlay had been opened: sending updates into "
+            "a hidden/suspended overlay window could hang the whole "
+            "now-playing watcher. Updates now go out on a side thread that can "
+            "never block the watcher, and hidden overlays stop receiving them "
+            "entirely.",
+            "Fixed the Mini player / Taskbar bar showing 'not playing' while "
+            "the main panel worked: overlay update failures are now logged "
+            "(instead of vanishing), and the overlays self-heal — if pushed "
+            "updates stop arriving for ~10s they quietly fetch now-playing "
+            "themselves at a slow, safe pace.",
+        ],
+    },
+    {
         "version": "1.0.32",
         "notes": [
             "Rebuilt the Spotify sign-in so it can no longer hang silently on "

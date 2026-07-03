@@ -188,6 +188,8 @@ class Api:
         self._np_np_sig_t = 0.0
         self._overlay_sig = None     # _push_overlays() de-dupe
         self._overlay_sig_t = 0.0
+        self._overlay_visible = {"mini": False, "bar": False}
+        self._push_thread = None     # in-flight overlay push (never awaited)
         self._np_last_vol = None
         self._np_last_vol_t = 0.0
         self._np_thread = None
@@ -288,12 +290,25 @@ class Api:
             self._np_stop.wait(1.0)
 
     def _push_overlays(self, np):
-        """Send now-playing to each open overlay window via evaluate_js. One
-        directional (Python -> JS), so it never adds to the JS->Python bridge
-        traffic that deadlocks multiple windows. De-duped (only pushed when the
-        track/state changes, or every ~5s) so the large cover-art payload isn't
-        re-marshalled every second."""
-        if self.mini_window is None and self.bar_window is None:
+        """Send now-playing to each VISIBLE overlay window. Called from the
+        now-playing loop, so it must NEVER block:
+
+        - pywebview's evaluate_js can wait forever on a hidden/suspended
+          WebView2 renderer (WebView2 throttles hidden windows, and 'closing'
+          an overlay only hides it) — one wedged call used to freeze the whole
+          watcher, leaving the panel stuck on the previous song.
+        - So the actual evaluate_js runs on a throwaway thread; if that thread
+          is still busy at the next tick, the push is skipped and (throttled)
+          logged instead of piling up or blocking.
+
+        Every outcome is observable: the injected expression returns a marker
+        ('ok' / 'no-render-fn'), and failures land in the Log. The overlays
+        also self-heal: if no push arrives for ~10s they fall back to a slow
+        poll_np pull."""
+        targets = [(kind, win) for kind, win
+                   in (("mini", self.mini_window), ("bar", self.bar_window))
+                   if win is not None and self._overlay_visible.get(kind)]
+        if not targets:
             return
         sig = self._np_sig(np)
         now = time.time()
@@ -301,17 +316,36 @@ class Api:
             return
         self._overlay_sig = sig
         self._overlay_sig_t = now
+        prev = self._push_thread
+        if prev is not None and prev.is_alive():
+            if now - getattr(self, "_push_stuck_t", 0) > 60:
+                self._push_stuck_t = now
+                self._log("[!] overlay push still in flight — skipping this "
+                          "one (an overlay window may be suspended)")
+            return
         try:
             payload = json.dumps(np or {})
         except Exception:  # noqa: BLE001
             return
-        for win in (self.mini_window, self.bar_window):
-            if win is None:
-                continue
+        script = (f"window.mhkRender ? (window.mhkRender({payload}), 'ok') "
+                  ": 'no-render-fn'")
+        self._push_thread = threading.Thread(
+            target=self._do_push, args=(script, targets), daemon=True)
+        self._push_thread.start()
+
+    def _do_push(self, script, targets):
+        for kind, win in targets:
             try:
-                win.evaluate_js(f"window.mhkRender && window.mhkRender({payload})")
-            except Exception:  # noqa: BLE001
-                pass
+                result = win.evaluate_js(script)
+                problem = None if result == "ok" else f"returned {result!r}"
+            except Exception as exc:  # noqa: BLE001
+                problem = f"{type(exc).__name__}: {exc}"
+            if problem:
+                key = f"_push_err_t_{kind}"
+                now = time.time()
+                if now - getattr(self, key, 0) > 60:
+                    setattr(self, key, now)
+                    self._log(f"[!] {kind} overlay push failed: {problem}")
 
     # -- config -----------------------------------------------------------
     def _apply(self, cfg):
@@ -512,6 +546,7 @@ class Api:
 
                 def _closed(*_a):
                     self.mini_window = None
+                    self._overlay_visible["mini"] = False
                 try:
                     self.mini_window.events.closed += _closed
                 except Exception:  # noqa: BLE001
@@ -521,11 +556,17 @@ class Api:
         except Exception as exc:  # noqa: BLE001
             self._log(f"[!] mini player: {exc}")
             self.mini_window = None
+            self._overlay_visible["mini"] = False
             return {"ok": False, "msg": str(exc)}
+        self._overlay_visible["mini"] = True
         self._overlay_sig = None   # force an immediate now-playing push
         return {"ok": True}
 
     def close_mini(self):
+        # Closing only HIDES the window (cheap re-open). Mark it not-visible so
+        # pushes stop — WebView2 suspends hidden renderers and a push into one
+        # can hang.
+        self._overlay_visible["mini"] = False
         if self.mini_window is not None:
             try:
                 self.mini_window.hide()
@@ -547,6 +588,7 @@ class Api:
 
                 def _closed(*_a):
                     self.bar_window = None
+                    self._overlay_visible["bar"] = False
                 try:
                     self.bar_window.events.closed += _closed
                 except Exception:  # noqa: BLE001
@@ -556,11 +598,15 @@ class Api:
         except Exception as exc:  # noqa: BLE001
             self._log(f"[!] taskbar player: {exc}")
             self.bar_window = None
+            self._overlay_visible["bar"] = False
             return {"ok": False, "msg": str(exc)}
+        self._overlay_visible["bar"] = True
         self._overlay_sig = None   # force an immediate now-playing push
         return {"ok": True}
 
     def close_bar(self):
+        # See close_mini — hidden renderers must not receive pushes.
+        self._overlay_visible["bar"] = False
         if self.bar_window is not None:
             try:
                 self.bar_window.hide()

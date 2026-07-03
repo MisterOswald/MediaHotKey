@@ -54,7 +54,19 @@ setInterval(tick, 500);
 
 // The main app pushes now-playing here (Python -> JS via evaluate_js). Exposed
 // immediately so pushes land even before the bridge finishes attaching.
-window.mhkRender = render;
+let lastPush = 0;
+window.mhkRender = (np) => { lastPush = Date.now(); render(np); };
+
+// Self-heal: if pushes stop arriving (or never start), pull via the cheap
+// arg-less poll_np() at a SLOW 5s pace — light enough not to stress the shared
+// bridge, but keeps the overlay alive no matter what happens to the push path.
+setInterval(async () => {
+  if (Date.now() - lastPush < 10000 || !ready()) return;
+  try {
+    const np = (await api().poll_np()).now_playing;
+    if (np) render(np);
+  } catch (e) { /* closing */ }
+}, 5000);
 
 function wire() {
   $('prev').onclick = () => api().transport('prev');
