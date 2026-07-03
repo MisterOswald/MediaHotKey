@@ -2,6 +2,21 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.35",
+        "notes": [
+            "Now-playing works with the Spotify WEB PLAYER (open.spotify.com "
+            "in a browser): in Spotify mode the panel only accepted the "
+            "desktop app's media session, so browser playback showed as 'not "
+            "playing'. An actively playing browser session now shows too "
+            "(paused background tabs still can't hijack the card).",
+            "No more invisible failures anywhere in now-playing: Spotify Web "
+            "API read errors (including 'not authorized') now appear in the "
+            "Log, the watcher recovers from any internal error instead of "
+            "silently dying, and when there's simply no source to read the "
+            "Log says so.",
+        ],
+    },
+    {
         "version": "1.0.34",
         "notes": [
             "Fixed 'not playing' while Spotify plays a MUSIC VIDEO (or an ad): "

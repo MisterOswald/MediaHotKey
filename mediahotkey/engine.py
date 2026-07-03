@@ -676,7 +676,14 @@ class Engine:
                 return playing[0][1]
             if spotify:
                 return spotify[0][1]
-            return None  # no local Spotify session → use the Web API instead
+            # No Spotify-desktop session. Spotify in a BROWSER (web player)
+            # registers under the browser's id — accept any actively PLAYING
+            # session so that still shows. (Only playing ones, so a paused
+            # background tab can't hijack the card.)
+            for aumid, s, status in items:
+                if status == 4:
+                    return s
+            return None  # nothing local → use the Web API instead
 
         # media mode: prefer the hinted app, then any playing session.
         hint = (self.config["settings"].get("media_app_hint", "") or "").lower()
@@ -865,7 +872,18 @@ class Engine:
             sp = self._ensure_spotify()
             pb = sp.current_playback(additional_types="episode")
         except Exception as exc:  # noqa: BLE001
-            self._dbg("spotify", f"web api error: {exc}")
+            # Must be visible (throttled) — a silently failing Web API read
+            # looks identical to "nothing playing" and is undebuggable.
+            now = time.time()
+            if now - getattr(self, "_sp_read_err_t", 0) > 60:
+                self._sp_read_err_t = now
+                if isinstance(exc, SpotifyNotAuthorized):
+                    self.log("[!] Spotify Web API not authorized — click "
+                             "Test / Authorize on the Spotify tab to see "
+                             "now-playing from Spotify.")
+                else:
+                    self.log(f"[!] Spotify now-playing read failed: "
+                             f"{type(exc).__name__}: {exc}")
             return None
         if not pb:
             self._dbg("spotify", "web api: nothing playing")

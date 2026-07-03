@@ -196,7 +196,7 @@ class Api:
         self._update_info = {}       # last update-check result (for the UI)
 
     def start_now_playing(self):
-        if self._np_thread is None:
+        if self._np_thread is None or not self._np_thread.is_alive():
             self._np_thread = threading.Thread(target=self._np_loop, daemon=True)
             self._np_thread.start()
 
@@ -211,83 +211,106 @@ class Api:
         (it sees the Spotify desktop app + browser, gives smooth local position,
         and — crucially — lets the panel transport control playback without
         Premium); the Spotify Web API is the fallback for remote-device
-        playback."""
+        playback.
+
+        The loop must never die silently — any per-iteration failure (even a
+        BaseException like a leaked CancelledError from an async read) is
+        logged (throttled) and the loop carries on."""
         while not self._np_stop.is_set():
-            np = None
-            now = time.time()
-            spec = self.config.get("spotify", {})
-            # Only hit the Web API if the user has authorized once (token cache
-            # present) — never trigger an interactive login from here.
-            can_spotify = bool(spec.get("client_id") and spec.get("client_secret")
-                               and os.path.exists(token_cache_path()))
-
-            if MEDIA_AVAILABLE:
-                np = self.engine.read_media_now_playing()
-            # When the active app is Spotify (or nothing local is playing) and
-            # the Web API is authorized, use the Web API now-playing — its
-            # volume is Spotify's OWN volume, so the slider stays in sync with
-            # Spotify's UI both ways. (Throttled to ~3s.)
-            is_spotify_app = bool(np and "spotify" in (np.get("app") or ""))
-            if can_spotify and (np is None or is_spotify_app):
-                if now - self._np_last_spotify_t >= 3:
-                    self._np_last_spotify_t = now
-                    self._np_last_spotify = self.engine.read_spotify_now_playing()
-                if self._np_last_spotify:
-                    np = self._np_last_spotify
-
-            if np:
-                # Lock the cover art to the first one we get for this track so
-                # it can't flip (SMTC data-URL vs Spotify https URL) or blink
-                # out when one source momentarily lacks art. Keyed on the title
-                # alone (normalized) so artist-string differences between the
-                # two sources don't break the lock.
-                key = (np.get("title") or "").strip().lower()
-                if np.get("art_url"):
-                    if key not in self._np_art_by_track:
-                        self._np_art_by_track = {key: np["art_url"]}
-                    np["art_url"] = self._np_art_by_track.get(key) or np["art_url"]
-                elif key in self._np_art_by_track:
-                    np["art_url"] = self._np_art_by_track[key]
-                # fetched_at is set by the reader (when the position was
-                # measured) so the JS progress bar extrapolates correctly even
-                # across the throttled Spotify reads — don't overwrite it here.
-                np.setdefault("fetched_at", int(now * 1000))
-                # Volume level for the panel: Spotify reader already includes it;
-                # for local/app sources read the per-app volume via Core Audio,
-                # throttled (pycaw enumeration is relatively costly). Never read
-                # the mixer level for Spotify — its real volume is the Web API
-                # one (so the slider matches Spotify's own slider).
-                if (np.get("source") != "spotify" and not is_spotify_app
-                        and np.get("volume") is None):
-                    if now - self._np_last_vol_t >= 2.5:
-                        self._np_last_vol_t = now
-                        try:
-                            self._np_last_vol = self.engine.read_app_volume()
-                        except Exception:  # noqa: BLE001
-                            self._np_last_vol = None
-                    np["volume"] = self._np_last_vol
-                self.engine.now_playing = np
-                self._np_misses = 0
-            else:
-                # Don't blank on a single transient miss — hold the last track
-                # (paused) and only clear after several seconds of nothing.
-                self._np_misses += 1
-                if self._np_misses >= 8:
-                    self.engine.now_playing = {
-                        "title": None, "artist": None, "art_url": None,
-                        "progress_ms": 0, "duration_ms": 0, "is_playing": False,
-                        "source": None, "fetched_at": int(now * 1000),
-                    }
-                elif self.engine.now_playing.get("title"):
-                    last = dict(self.engine.now_playing)
-                    last["is_playing"] = False
-                    self.engine.now_playing = last
-            # Push to any open overlay (mini / taskbar bar). The overlays do
-            # NOT poll our js_api — a 2nd pywebview window calling back into
-            # Python every second saturates the shared GUI-thread bridge and
-            # freezes the whole app. Pushing one-way (Python -> JS) avoids that.
-            self._push_overlays(self.engine.now_playing)
+            try:
+                self._np_tick()
+            except BaseException as exc:  # noqa: BLE001
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
+                now = time.time()
+                if now - getattr(self, "_np_crash_t", 0) > 60:
+                    self._np_crash_t = now
+                    self._log(f"[!] now-playing watcher error (recovered): "
+                              f"{type(exc).__name__}: {exc}")
             self._np_stop.wait(1.0)
+
+    def _np_tick(self):
+        """One refresh pass — the body of the watcher loop."""
+        np = None
+        now = time.time()
+        spec = self.config.get("spotify", {})
+        # Only hit the Web API if the user has authorized once (token cache
+        # present) — never trigger an interactive login from here.
+        can_spotify = bool(spec.get("client_id") and spec.get("client_secret")
+                           and os.path.exists(token_cache_path()))
+
+        if MEDIA_AVAILABLE:
+            np = self.engine.read_media_now_playing()
+        # When the active app is Spotify (or nothing local is playing) and
+        # the Web API is authorized, use the Web API now-playing — its
+        # volume is Spotify's OWN volume, so the slider stays in sync with
+        # Spotify's UI both ways. (Throttled to ~3s.)
+        is_spotify_app = bool(np and "spotify" in (np.get("app") or ""))
+        if can_spotify and (np is None or is_spotify_app):
+            if now - self._np_last_spotify_t >= 3:
+                self._np_last_spotify_t = now
+                self._np_last_spotify = self.engine.read_spotify_now_playing()
+            if self._np_last_spotify:
+                np = self._np_last_spotify
+
+        if np:
+            # Lock the cover art to the first one we get for this track so
+            # it can't flip (SMTC data-URL vs Spotify https URL) or blink
+            # out when one source momentarily lacks art. Keyed on the title
+            # alone (normalized) so artist-string differences between the
+            # two sources don't break the lock.
+            key = (np.get("title") or "").strip().lower()
+            if np.get("art_url"):
+                if key not in self._np_art_by_track:
+                    self._np_art_by_track = {key: np["art_url"]}
+                np["art_url"] = self._np_art_by_track.get(key) or np["art_url"]
+            elif key in self._np_art_by_track:
+                np["art_url"] = self._np_art_by_track[key]
+            # fetched_at is set by the reader (when the position was
+            # measured) so the JS progress bar extrapolates correctly even
+            # across the throttled Spotify reads — don't overwrite it here.
+            np.setdefault("fetched_at", int(now * 1000))
+            # Volume level for the panel: Spotify reader already includes it;
+            # for local/app sources read the per-app volume via Core Audio,
+            # throttled (pycaw enumeration is relatively costly). Never read
+            # the mixer level for Spotify — its real volume is the Web API
+            # one (so the slider matches Spotify's own slider).
+            if (np.get("source") != "spotify" and not is_spotify_app
+                    and np.get("volume") is None):
+                if now - self._np_last_vol_t >= 2.5:
+                    self._np_last_vol_t = now
+                    try:
+                        self._np_last_vol = self.engine.read_app_volume()
+                    except Exception:  # noqa: BLE001
+                        self._np_last_vol = None
+                np["volume"] = self._np_last_vol
+            self.engine.now_playing = np
+            self._np_misses = 0
+        else:
+            # Don't blank on a single transient miss — hold the last track
+            # (paused) and only clear after several seconds of nothing.
+            self._np_misses += 1
+            if self._np_misses == 8 and not can_spotify:
+                if now - getattr(self, "_np_nosrc_t", 0) > 300:
+                    self._np_nosrc_t = now
+                    self._log("[i] nothing to display: no Windows media "
+                              "session, and the Spotify Web API isn't "
+                              "authorized (Spotify tab → Test / Authorize).")
+            if self._np_misses >= 8:
+                self.engine.now_playing = {
+                    "title": None, "artist": None, "art_url": None,
+                    "progress_ms": 0, "duration_ms": 0, "is_playing": False,
+                    "source": None, "fetched_at": int(now * 1000),
+                }
+            elif self.engine.now_playing.get("title"):
+                last = dict(self.engine.now_playing)
+                last["is_playing"] = False
+                self.engine.now_playing = last
+        # Push to any open overlay (mini / taskbar bar). The overlays do
+        # NOT poll our js_api — a 2nd pywebview window calling back into
+        # Python every second saturates the shared GUI-thread bridge and
+        # freezes the whole app. Pushing one-way (Python -> JS) avoids that.
+        self._push_overlays(self.engine.now_playing)
 
     def _push_overlays(self, np):
         """Send now-playing to each VISIBLE overlay window. Called from the
