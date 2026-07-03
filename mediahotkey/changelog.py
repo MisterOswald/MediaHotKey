@@ -2,6 +2,22 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.31",
+        "notes": [
+            "Fixed the now-playing panel staying on 'not playing' while music "
+            "was clearly playing: the 1.0.29 exe slimming broke the "
+            "Windows-media reader at runtime (its components load dynamically, "
+            "so the import checks still passed). The full media components are "
+            "back, and media-read failures now show in the Log instead of "
+            "being silently swallowed.",
+            "Test / Authorize now verifies your Client ID / Secret pair with "
+            "Spotify in ~a second BEFORE opening the browser sign-in — a "
+            "wrong or regenerated pair gets a clear error instead of hanging "
+            "on 'Authorizing…' forever. Also added an on-screen hint for the "
+            "'Invalid redirect URI' case.",
+        ],
+    },
+    {
         "version": "1.0.30",
         "notes": [
             "Fixed Spotify stuck on 'authorizing…' with a blank now-playing "

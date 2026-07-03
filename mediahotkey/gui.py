@@ -68,6 +68,34 @@ def _icon_path():
     return p if os.path.exists(p) else None
 
 
+def _check_spotify_creds(cid, secret):
+    """Validate the Client ID/Secret pair directly against Spotify's token
+    endpoint (client-credentials grant) BEFORE opening a browser sign-in, so a
+    wrong / regenerated pair fails in a second with a clear message instead of
+    an error page in a browser tab the user may never see. Returns an error
+    string, or None when the pair is fine (or the check itself couldn't run)."""
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    basic = base64.b64encode(f"{cid}:{secret}".encode()).decode()
+    req = urllib.request.Request(
+        "https://accounts.spotify.com/api/token",
+        data=urllib.parse.urlencode({"grant_type": "client_credentials"}).encode(),
+        headers={"Authorization": "Basic " + basic,
+                 "Content-Type": "application/x-www-form-urlencoded"})
+    try:
+        with urllib.request.urlopen(req, timeout=10):
+            return None
+    except urllib.error.HTTPError as e:
+        if e.code in (400, 401):
+            return ("Spotify rejected this Client ID / Secret pair. Re-copy "
+                    "BOTH from developer.spotify.com → your app → Settings — "
+                    "and note that regenerating the secret kills the old one.")
+        return None
+    except Exception:  # noqa: BLE001 — network hiccup; don't block the sign-in
+        return None
+
+
 def _port_in_use(port):
     """True if nothing can listen on 127.0.0.1:<port> (someone's bound to it)."""
     import socket
@@ -506,10 +534,16 @@ class Api:
             try:
                 probe._ensure_spotify()          # cached / refreshable sign-in
             except SpotifyNotAuthorized:
-                # A fresh browser sign-in is needed. It receives the redirect on
-                # a local port — if that port is squatted (usually a stuck older
-                # MediaHotKey.exe), say so instead of hanging on "authorizing…".
+                # A fresh browser sign-in is needed. Fail fast on the two
+                # things that otherwise hang it forever: a wrong ID/secret pair
+                # (the browser tab just shows an error the user may miss), and
+                # a squatted redirect port (usually a stuck older
+                # MediaHotKey.exe).
                 spec = self.config.get("spotify", {})
+                bad = _check_spotify_creds(spec.get("client_id", ""),
+                                           spec.get("client_secret", ""))
+                if bad:
+                    return {"ok": False, "msg": bad}
                 from urllib.parse import urlparse
                 port = urlparse(spec.get("redirect_uri")
                                 or "http://127.0.0.1:8888/callback").port or 8888
@@ -526,7 +560,11 @@ class Api:
                     os.remove(token_cache_path())
                 except OSError:
                     pass
-                self._log("[i] opening the Spotify sign-in in your browser…")
+                uri = spec.get("redirect_uri") or "http://127.0.0.1:8888/callback"
+                self._log("[i] opening the Spotify sign-in in your browser… If "
+                          "the tab shows 'Invalid redirect URI', add exactly "
+                          f"{uri} under Redirect URIs in your Spotify app's "
+                          "settings and save.")
                 probe._ensure_spotify(interactive=True)
             pb = probe._current()
             if pb and pb.get("item"):

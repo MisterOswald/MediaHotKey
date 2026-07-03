@@ -696,10 +696,10 @@ class Engine:
         the most universal source on Windows."""
         if not MEDIA_AVAILABLE:
             return None
-        try:
-            mgr = await MediaManager.request_async()
-        except Exception:  # noqa: BLE001
-            return None
+        # NOTE: no try/except here — if the media manager itself fails, that's
+        # systemic (e.g. a broken bundle), and it must surface in the Log via
+        # read_media_now_playing instead of silently blanking the panel.
+        mgr = await MediaManager.request_async()
         session = self._pick_now_playing_session(mgr)
         if session is None:
             self._dbg("smtc", "no session (or no Spotify session in Spotify mode)")
@@ -773,7 +773,13 @@ class Engine:
         try:
             return self._run_smtc(self._smtc_snapshot())
         except Exception as exc:  # noqa: BLE001
-            self._dbg("smtc", f"snapshot crashed: {exc}")
+            # A real failure (not just "nothing playing") — put it in the Log,
+            # throttled to once a minute, so a broken media reader is visible
+            # instead of the panel just sitting on "not playing".
+            now = time.time()
+            if now - getattr(self, "_smtc_err_t", 0) > 60:
+                self._smtc_err_t = now
+                self.log(f"[!] media read failed: {type(exc).__name__}: {exc}")
             return None
 
     async def _control_active(self, action):

@@ -297,7 +297,10 @@ function wire() {
   };
   $('#btn-dashboard').onclick = () => api().open_url('https://developer.spotify.com/dashboard');
   $('#btn-test-spotify').onclick = async () => {
-    const s = $('#spotify-status'); s.className = 'status'; s.textContent = 'Authorizing… a browser tab may open.';
+    const s = $('#spotify-status'); s.className = 'status';
+    s.textContent = 'Authorizing… approve in the browser tab that opens. ' +
+      'If that tab shows "Invalid redirect URI", add the Redirect URI above ' +
+      'to your Spotify app settings, save, and try again.';
     const r = await api().test_spotify(cfg);
     s.className = 'status' + (r.ok ? '' : ' err');
     s.innerHTML = r.ok ? `✓ ${esc(r.msg)}` : `✗ ${esc(r.msg)}`;
