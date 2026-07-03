@@ -2,6 +2,20 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.30",
+        "notes": [
+            "Fixed Spotify stuck on 'authorizing…' with a blank now-playing "
+            "panel. When the saved sign-in could no longer be refreshed (e.g. "
+            "after regenerating the client secret), background code silently "
+            "fell into an interactive browser sign-in and blocked forever — "
+            "jamming the now-playing watcher and squatting the sign-in port so "
+            "a real Test / Authorize could never finish. Background code now "
+            "never signs in interactively; only Test / Authorize does, it "
+            "clears a dead saved sign-in first, and it tells you if the "
+            "sign-in port is blocked by a stuck old MediaHotKey process.",
+        ],
+    },
+    {
         "version": "1.0.29",
         "notes": [
             "Much faster startup: the .exe no longer bundles the entire "

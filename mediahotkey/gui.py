@@ -27,7 +27,8 @@ except Exception:  # noqa: BLE001
 from . import __version__, updater
 from .changelog import CHANGELOG
 from .config import load_config, save_config, config_path, token_cache_path, config_dir
-from .engine import Engine, KEYBOARD_AVAILABLE, MEDIA_AVAILABLE
+from .engine import (Engine, KEYBOARD_AVAILABLE, MEDIA_AVAILABLE,
+                     SpotifyNotAuthorized)
 from .discord_notify import Discord
 
 if KEYBOARD_AVAILABLE:
@@ -65,6 +66,17 @@ def _icon_path():
         os.path.dirname(os.path.abspath(__file__)))
     p = os.path.join(base, "assets", "icon.ico")
     return p if os.path.exists(p) else None
+
+
+def _port_in_use(port):
+    """True if nothing can listen on 127.0.0.1:<port> (someone's bound to it)."""
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("127.0.0.1", int(port)))
+            return False
+        except OSError:
+            return True
 
 
 def _merge(dst, src):
@@ -491,6 +503,31 @@ class Api:
         self._apply(cfg)
         try:
             probe = Engine(self.config, log=self._log)
+            try:
+                probe._ensure_spotify()          # cached / refreshable sign-in
+            except SpotifyNotAuthorized:
+                # A fresh browser sign-in is needed. It receives the redirect on
+                # a local port — if that port is squatted (usually a stuck older
+                # MediaHotKey.exe), say so instead of hanging on "authorizing…".
+                spec = self.config.get("spotify", {})
+                from urllib.parse import urlparse
+                port = urlparse(spec.get("redirect_uri")
+                                or "http://127.0.0.1:8888/callback").port or 8888
+                if _port_in_use(port):
+                    return {"ok": False, "msg":
+                            f"Can't start the Spotify sign-in: port {port} is "
+                            "already in use — usually a stuck older "
+                            "MediaHotKey.exe. Open Task Manager, end any other "
+                            "MediaHotKey processes, then click Test / Authorize "
+                            "again."}
+                # Clear the stale/unrefreshable sign-in so the flow starts clean
+                # (a dead cached token otherwise poisons the retry).
+                try:
+                    os.remove(token_cache_path())
+                except OSError:
+                    pass
+                self._log("[i] opening the Spotify sign-in in your browser…")
+                probe._ensure_spotify(interactive=True)
             pb = probe._current()
             if pb and pb.get("item"):
                 return {"ok": True, "msg": f"Connected — now playing: {pb['item']['name']}"}

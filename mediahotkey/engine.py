@@ -88,6 +88,11 @@ SCOPE = (
     "user-library-modify playlist-modify-public playlist-modify-private"
 )
 
+
+class SpotifyNotAuthorized(RuntimeError):
+    """No cached Spotify sign-in usable from background code — the user needs
+    to click Test / Authorize on the Spotify tab (the only interactive path)."""
+
 # Hard cap on any single Spotify Web API request. Without this, spotipy uses no
 # timeout, so a slow/stalled network call blocks the now-playing thread — the
 # panel stops updating until the socket finally returns ("loads after a while").
@@ -190,8 +195,18 @@ class Engine:
         }
 
     # ------------------------------------------------------------- spotify
-    def _ensure_spotify(self):
-        """Build the Spotify client on first use (triggers OAuth if needed)."""
+    def _ensure_spotify(self, interactive=False):
+        """Build the Spotify client on first use.
+
+        interactive=False (the default — hotkeys, the now-playing watcher,
+        volume): only a cached/refreshable sign-in is accepted. It must NEVER
+        fall into spotipy's interactive browser flow, which blocks the calling
+        thread forever on a local-redirect socket. When the cached sign-in is
+        missing or can't be refreshed (e.g. the client secret was regenerated),
+        raise SpotifyNotAuthorized instead — callers report it and move on.
+
+        interactive=True (the Spotify tab's Test/Authorize button only): allowed
+        to open the browser sign-in."""
         if self._sp is not None:
             return self._sp
         if not SPOTIPY_AVAILABLE:
@@ -199,18 +214,30 @@ class Engine:
         spec = self.config["spotify"]
         if not spec.get("client_id") or not spec.get("client_secret"):
             raise RuntimeError("Spotify Client ID / Secret not set — open Settings.")
+        auth = SpotifyOAuth(
+            client_id=spec["client_id"],
+            client_secret=spec["client_secret"],
+            redirect_uri=spec.get("redirect_uri", "http://127.0.0.1:8888/callback"),
+            scope=SCOPE,
+            cache_path=token_cache_path(),
+            open_browser=True,
+            requests_timeout=SPOTIFY_TIMEOUT,   # token refresh must not stall
+        )
+        if not interactive:
+            token = None
+            try:
+                token = auth.validate_token(auth.cache_handler.get_cached_token())
+            except Exception:  # noqa: BLE001 — unrefreshable/corrupt cache
+                token = None
+            if not token:
+                raise SpotifyNotAuthorized(
+                    "Spotify isn't authorized — open the Spotify tab and click "
+                    "Test / Authorize.")
         self._sp = spotipy.Spotify(
             requests_session=_build_session(),
             requests_timeout=SPOTIFY_TIMEOUT,
             retries=0,
-            auth_manager=SpotifyOAuth(
-                client_id=spec["client_id"],
-                client_secret=spec["client_secret"],
-                redirect_uri=spec.get("redirect_uri", "http://127.0.0.1:8888/callback"),
-                scope=SCOPE,
-                cache_path=token_cache_path(),
-                open_browser=True,
-            ),
+            auth_manager=auth,
         )
         return self._sp
 
