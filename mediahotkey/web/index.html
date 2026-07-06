@@ -124,7 +124,10 @@
       <div class="panel" data-tab="Log">
         <div class="log-head">
           <div class="h-sec" style="margin:0">Activity log</div>
-          <button class="btn clear" id="btn-clear">Clear log</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn clear" id="btn-logfile" title="Open the saved log file (activity.log in the app's data folder — includes past sessions and [health] lines)">⤓ Saved log file</button>
+            <button class="btn clear" id="btn-clear">Clear log</button>
+          </div>
         </div>
         <div class="console" id="console"></div>
       </div>

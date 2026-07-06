@@ -155,6 +155,11 @@ class Engine:
         self._poller_thread = None
         self._stop_event = threading.Event()
 
+        # Shared current_playback cache (watcher + poller) and Web API call
+        # accounting for the [health] telemetry line.
+        self._pb_cache = (None, 0.0)
+        self._net = {"n": 0, "ms": 0.0, "mx": 0.0, "err": 0}
+
         self._seen_lock = threading.Lock()
         self._seen = {"track_id": None, "is_playing": None}
         self._last_add = {"track": None, "playlist": None}
@@ -250,13 +255,46 @@ class Engine:
             raise SpotifyNotAuthorized(
                 "Spotify isn't authorized — open the Spotify tab and click "
                 "Test / Authorize.")
+        session = _build_session()
+        session.hooks.setdefault("response", []).append(self._net_hook)
         self._sp = spotipy.Spotify(
-            requests_session=_build_session(),
+            requests_session=session,
             requests_timeout=SPOTIFY_TIMEOUT,
             retries=0,
             auth_manager=auth,
         )
         return self._sp
+
+    def _net_hook(self, response, *_a, **_k):
+        """requests response hook — per-call Web API accounting for [health]."""
+        try:
+            st = self._net
+            st["n"] += 1
+            ms = response.elapsed.total_seconds() * 1000
+            st["ms"] += ms
+            st["mx"] = max(st["mx"], ms)
+            if response.status_code >= 400:
+                st["err"] += 1
+        except Exception:  # noqa: BLE001
+            pass
+
+    def net_snapshot(self):
+        """Return and reset the Web API call stats (for the health line)."""
+        st = self._net
+        self._net = {"n": 0, "ms": 0.0, "mx": 0.0, "err": 0}
+        return st
+
+    def _current_cached(self, max_age):
+        """current_playback() shared between the now-playing watcher and the
+        Discord poller, so the two timers don't each hit the Web API on their
+        own — this halves the app's steady-state network chatter."""
+        pb, t = self._pb_cache
+        now = time.time()
+        if t and now - t < max_age:
+            return pb
+        pb = self._ensure_spotify().current_playback(additional_types="episode")
+        self._pb_cache = (pb, now)
+        return pb
 
     def _current(self):
         return self._ensure_spotify().current_playback()
@@ -911,8 +949,7 @@ class Engine:
         with item=null while clearly playing — gets a live generic card instead
         of the panel pretending nothing is playing."""
         try:
-            sp = self._ensure_spotify()
-            pb = sp.current_playback(additional_types="episode")
+            pb = self._current_cached(2.8)
         except Exception as exc:  # noqa: BLE001
             # Must be visible (throttled) — a silently failing Web API read
             # looks identical to "nothing playing" and is undebuggable.
@@ -1060,7 +1097,7 @@ class Engine:
             if self.mode != "spotify":
                 continue
             try:
-                self._announce_playback(self._current())
+                self._announce_playback(self._current_cached(3.0))
             except Exception as exc:  # noqa: BLE001
                 if (SPOTIPY_AVAILABLE
                         and isinstance(exc, spotipy.exceptions.SpotifyException)

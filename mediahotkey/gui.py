@@ -166,6 +166,10 @@ class Api:
         self.config = load_config()
         self.logs = collections.deque(maxlen=400)
         self._log_lock = threading.Lock()
+        # Every log line is also appended (timestamped) to a file in the
+        # app's data folder, so sessions can be reviewed/exported after the
+        # fact — crucial for diagnosing issues that build up over hours.
+        self._log_path = os.path.join(config_dir(), "activity.log")
         self.window = None
         self.mini_window = None
         self.bar_window = None
@@ -195,6 +199,12 @@ class Api:
         self._np_thread = None
         self._update_info = {}       # last update-check result (for the UI)
 
+        # Health telemetry (logged every 30s as a "[health]" line).
+        self._last_poll_t = 0.0      # last JS poll() — detects a wedged window
+        self._tick_n = 0             # now-playing tick timing stats
+        self._tick_total = 0.0
+        self._tick_max = 0.0
+
     def start_now_playing(self):
         if self._np_thread is None or not self._np_thread.is_alive():
             self._np_thread = threading.Thread(target=self._np_loop, daemon=True)
@@ -202,8 +212,23 @@ class Api:
 
     # -- logging ----------------------------------------------------------
     def _log(self, msg):
+        msg = str(msg)
         with self._log_lock:
-            self.logs.append(str(msg))
+            self.logs.append(msg)
+            try:
+                # Rotate at ~2 MB (keep one previous file) so it can run for
+                # months without growing unbounded.
+                if (os.path.exists(self._log_path)
+                        and os.path.getsize(self._log_path) > 2_000_000):
+                    old = self._log_path + ".1"
+                    if os.path.exists(old):
+                        os.remove(old)
+                    os.replace(self._log_path, old)
+                stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+                with open(self._log_path, "a", encoding="utf-8") as fh:
+                    fh.write(f"{stamp} {msg}\n")
+            except OSError:
+                pass
 
     # -- now-playing watcher ---------------------------------------------
     def _np_loop(self):
@@ -217,6 +242,7 @@ class Api:
         BaseException like a leaked CancelledError from an async read) is
         logged (throttled) and the loop carries on."""
         while not self._np_stop.is_set():
+            t0 = time.perf_counter()
             try:
                 self._np_tick()
             except BaseException as exc:  # noqa: BLE001
@@ -227,6 +253,14 @@ class Api:
                     self._np_crash_t = now
                     self._log(f"[!] now-playing watcher error (recovered): "
                               f"{type(exc).__name__}: {exc}")
+            dt = time.perf_counter() - t0
+            self._tick_n += 1
+            self._tick_total += dt
+            self._tick_max = max(self._tick_max, dt)
+            if dt > 2.0:
+                self._log(f"[health] slow now-playing tick: {dt:.1f}s — if "
+                          "this coincides with a stutter, this thread is the "
+                          "culprit")
             self._np_stop.wait(1.0)
 
     def _np_tick(self):
@@ -277,7 +311,7 @@ class Api:
             # one (so the slider matches Spotify's own slider).
             if (np.get("source") != "spotify" and not is_spotify_app
                     and np.get("volume") is None):
-                if now - self._np_last_vol_t >= 2.5:
+                if now - self._np_last_vol_t >= 5.0:
                     self._np_last_vol_t = now
                     try:
                         self._np_last_vol = self.engine.read_app_volume()
@@ -311,6 +345,73 @@ class Api:
         # Python every second saturates the shared GUI-thread bridge and
         # freezes the whole app. Pushing one-way (Python -> JS) avoids that.
         self._push_overlays(self.engine.now_playing)
+
+    # -- health telemetry --------------------------------------------------
+    def _health_loop(self):
+        """Log a '[health] …' line every 30s: process memory / handles /
+        threads, UI heartbeat, now-playing tick timing, and Spotify Web API
+        call stats. Written for correlating 'ping spikes / stutter after a
+        while' reports with what the app was actually doing at that moment."""
+        while not self._np_stop.is_set():
+            self._np_stop.wait(30)
+            if self._np_stop.is_set():
+                break
+            try:
+                self._log(self._health_line())
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _health_line(self):
+        parts = []
+        if sys.platform.startswith("win"):
+            try:
+                import ctypes
+                from ctypes import wintypes
+
+                class PMC(ctypes.Structure):
+                    _fields_ = [
+                        ("cb", wintypes.DWORD),
+                        ("PageFaultCount", wintypes.DWORD),
+                        ("PeakWorkingSetSize", ctypes.c_size_t),
+                        ("WorkingSetSize", ctypes.c_size_t),
+                        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                        ("PagefileUsage", ctypes.c_size_t),
+                        ("PeakPagefileUsage", ctypes.c_size_t),
+                    ]
+
+                proc = ctypes.windll.kernel32.GetCurrentProcess()
+                pmc = PMC()
+                pmc.cb = ctypes.sizeof(PMC)
+                if ctypes.windll.psapi.GetProcessMemoryInfo(
+                        proc, ctypes.byref(pmc), pmc.cb):
+                    parts.append(f"mem {pmc.WorkingSetSize // (1024 * 1024)}MB")
+                count = wintypes.DWORD()
+                if ctypes.windll.kernel32.GetProcessHandleCount(
+                        proc, ctypes.byref(count)):
+                    parts.append(f"handles {count.value}")
+            except Exception:  # noqa: BLE001
+                pass
+        parts.append(f"threads {threading.active_count()}")
+        if self._last_poll_t:
+            gap = time.time() - self._last_poll_t
+            parts.append(f"ui-poll {gap:.0f}s ago"
+                         + (" (hidden window pauses it)" if gap > 60 else ""))
+        n, total, mx = self._tick_n, self._tick_total, self._tick_max
+        self._tick_n, self._tick_total, self._tick_max = 0, 0.0, 0.0
+        if n:
+            parts.append(f"np-tick avg {total / n * 1000:.0f}ms "
+                         f"max {mx * 1000:.0f}ms")
+        net = self.engine.net_snapshot()
+        if net["n"]:
+            parts.append(f"spotify-api {net['n']} calls "
+                         f"avg {net['ms'] / net['n']:.0f}ms "
+                         f"max {net['mx']:.0f}ms err {net['err']}")
+        else:
+            parts.append("spotify-api 0 calls")
+        return "[health] " + " · ".join(parts)
 
     def _push_overlays(self, np):
         """Send now-playing to each VISIBLE overlay window. Called from the
@@ -414,6 +515,7 @@ class Api:
                 np.get("volume"), np.get("duration_ms"), len(art))
 
     def poll(self):
+        self._last_poll_t = time.time()   # UI heartbeat for the health line
         # Lightweight: NO logs here (they're large and would cross the bridge
         # every second). The UI fetches logs via get_logs() only on the Log tab.
         # And only ship now_playing when it actually changed (or every ~5s as a
@@ -489,6 +591,21 @@ class Api:
         with self._log_lock:
             self.logs.clear()
         return {"ok": True}
+
+    def open_log_file(self):
+        """Open the persistent activity.log (in the app's data folder) so the
+        full history — including past sessions — can be read or shared."""
+        try:
+            if not os.path.exists(self._log_path):
+                return {"ok": False, "msg": "No log file yet."}
+            if sys.platform.startswith("win"):
+                os.startfile(self._log_path)  # noqa: S606
+            else:
+                import subprocess
+                subprocess.Popen(["xdg-open", self._log_path])
+            return {"ok": True, "msg": self._log_path}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "msg": f"{exc} — the file is at {self._log_path}"}
 
     # -- engine lifecycle -------------------------------------------------
     def toggle_engine(self, cfg=None):
@@ -1133,6 +1250,7 @@ def main():
         # Start the now-playing watcher now that the window is up, and defer the
         # update check a few seconds so neither competes with WebView2's init.
         api.start_now_playing()
+        threading.Thread(target=api._health_loop, daemon=True).start()
         if settings.get("update_check_on_launch"):
             threading.Timer(
                 5.0,

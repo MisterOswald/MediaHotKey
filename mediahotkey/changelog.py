@@ -2,6 +2,26 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.38",
+        "notes": [
+            "Cut the app's steady-state network traffic roughly in half: the "
+            "now-playing watcher and the Discord poster now share one Spotify "
+            "playback fetch instead of each calling on their own timer, and "
+            "the per-app volume read runs half as often — for anyone seeing "
+            "ping spikes while gaming with the app open.",
+            "Added health telemetry for tracking down slow-buildup issues "
+            "(stutter, ping spikes, 'Not Responding'): every 30s the log gets "
+            "a [health] line with the app's memory / handle / thread counts, "
+            "a UI-responsiveness heartbeat, now-playing timing, and Spotify "
+            "API call stats (count / avg / max / errors). Slow ticks are "
+            "flagged the moment they happen.",
+            "The activity log is now SAVED to a file (activity.log in the "
+            "app's data folder, timestamped, auto-rotated) so whole sessions "
+            "can be reviewed or shared afterwards — new '⤓ Saved log file' "
+            "button on the Log tab opens it.",
+        ],
+    },
+    {
         "version": "1.0.37",
         "notes": [
             "Discord posts going quiet is no longer silent: the background "

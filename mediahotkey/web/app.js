@@ -78,6 +78,7 @@ const MOCK = {
   test_discord: async () => ({ ok: true, msg: 'Test message sent. Check your channel.' }),
   record_hotkey: async () => '', open_url: () => {}, choose_mascot: async () => '',
   clear_log: async () => { DEMO.logs = []; return { ok: true }; },
+  open_log_file: async () => ({ ok: true, msg: 'demo' }),
   get_logs: async () => ({ logs: DEMO.logs }),
   get_changelog: async () => [
     { version: '1.0.5', notes: ['Now-playing cover shows the full art, no cropping.',
@@ -311,6 +312,10 @@ function wire() {
     s.textContent = (r.ok ? '✓ ' : '✗ ') + r.msg;
   };
   $('#btn-clear').onclick = async () => { await api().clear_log(); renderLog([]); };
+  $('#btn-logfile').onclick = async () => {
+    const r = await api().open_log_file();
+    toast(r.ok ? 'Opened activity.log' : (r.msg || 'No log file yet'));
+  };
   $('#art').onclick = async () => {
     const data = await api().choose_mascot();
     if (data) { mascotImage = data; cfg.mascot = { image: data }; setArt(null); }
