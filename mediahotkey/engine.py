@@ -287,12 +287,26 @@ class Engine:
     def _current_cached(self, max_age):
         """current_playback() shared between the now-playing watcher and the
         Discord poller, so the two timers don't each hit the Web API on their
-        own — this halves the app's steady-state network chatter."""
+        own.
+
+        Adaptive backoff: when a call comes back slow (>0.8s — the network is
+        congested, e.g. mid-game ping spike), polling eases off for a minute
+        so the app stays out of the network's way exactly when it matters."""
         pb, t = self._pb_cache
         now = time.time()
+        if now < getattr(self, "_api_slow_until", 0):
+            max_age = max(max_age * 2, 10.0)
         if t and now - t < max_age:
             return pb
+        t0 = time.perf_counter()
         pb = self._ensure_spotify().current_playback(additional_types="episode")
+        dt = time.perf_counter() - t0
+        if dt > 0.8:
+            self._api_slow_until = now + 60
+            if now - getattr(self, "_api_slow_log_t", 0) > 120:
+                self._api_slow_log_t = now
+                self.log(f"[health] Spotify API slow ({dt:.1f}s — network "
+                         "congested) — easing off polling for 60s")
         self._pb_cache = (pb, now)
         return pb
 
@@ -940,7 +954,7 @@ class Engine:
                 self.log(f"[i] {action}: no controllable media session")
         self._run_async(lambda: self._safe(go, f"transport {action}"))
 
-    def read_spotify_now_playing(self):
+    def read_spotify_now_playing(self, max_age=2.8):
         """Now-playing via the Spotify Web API (covers remote devices).
 
         Handles every content type Spotify can play, not just plain tracks:
@@ -949,7 +963,7 @@ class Engine:
         with item=null while clearly playing — gets a live generic card instead
         of the panel pretending nothing is playing."""
         try:
-            pb = self._current_cached(2.8)
+            pb = self._current_cached(max_age)
         except Exception as exc:  # noqa: BLE001
             # Must be visible (throttled) — a silently failing Web API read
             # looks identical to "nothing playing" and is undebuggable.
@@ -1097,7 +1111,11 @@ class Engine:
             if self.mode != "spotify":
                 continue
             try:
-                self._announce_playback(self._current_cached(3.0))
+                # Cache window just under the poll interval so the poller and
+                # the watcher together produce ~1 API call per interval, not
+                # one each (the log showed misses every time at 2.8s vs 3s).
+                self._announce_playback(
+                    self._current_cached(max(2.5, interval - 0.5)))
             except Exception as exc:  # noqa: BLE001
                 if (SPOTIPY_AVAILABLE
                         and isinstance(exc, spotipy.exceptions.SpotifyException)

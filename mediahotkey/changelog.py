@@ -2,6 +2,20 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.39",
+        "notes": [
+            "Network tuning from a real gaming-session log: Spotify API calls "
+            "drop from ~every 3s to ~1 per Poll interval (the 1.0.38 cache "
+            "windows were mis-tuned and missed every time), and the Poll "
+            "interval setting (General tab) now governs ALL Spotify polling — "
+            "set it to 10-15s while gaming for minimal chatter.",
+            "Added automatic backoff: when a Spotify call comes back slow "
+            "(network congested — exactly the mid-game ping-spike moment), "
+            "the app eases its polling off for a minute and notes it in the "
+            "log, staying out of the network's way when it matters most.",
+        ],
+    },
+    {
         "version": "1.0.38",
         "notes": [
             "Cut the app's steady-state network traffic roughly in half: the "

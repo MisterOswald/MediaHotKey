@@ -278,12 +278,19 @@ class Api:
         # When the active app is Spotify (or nothing local is playing) and
         # the Web API is authorized, use the Web API now-playing — its
         # volume is Spotify's OWN volume, so the slider stays in sync with
-        # Spotify's UI both ways. (Throttled to ~3s.)
+        # Spotify's UI both ways. Cadence follows the Poll interval setting
+        # (min 3s), and the cache window sits just under it so the watcher
+        # and the Discord poller share ~1 API call per interval total.
         is_spotify_app = bool(np and "spotify" in (np.get("app") or ""))
         if can_spotify and (np is None or is_spotify_app):
-            if now - self._np_last_spotify_t >= 3:
+            try:
+                sp_iv = max(3, int(self.config["settings"].get("poll_interval", 5)))
+            except (TypeError, ValueError):
+                sp_iv = 5
+            if now - self._np_last_spotify_t >= sp_iv:
                 self._np_last_spotify_t = now
-                self._np_last_spotify = self.engine.read_spotify_now_playing()
+                self._np_last_spotify = self.engine.read_spotify_now_playing(
+                    max_age=max(2.5, sp_iv - 0.5))
             if self._np_last_spotify:
                 np = self._np_last_spotify
 
