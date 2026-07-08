@@ -149,6 +149,40 @@ def _port_in_use(port):
             return True
 
 
+_SINGLETON = {"mutex": None, "show_event": None}
+
+
+def _acquire_single_instance(timeout_s=15):
+    """One MediaHotKey at a time. Two instances share the hotkeys, the sign-in
+    port and the WebView2 profile — and the profile lock stalls the second
+    window for ~20s ('can barely open' / 'Not Responding' right after launch).
+
+    Returns True when this process owns the app — waiting up to `timeout_s`
+    for an exiting instance to hand over (covers the update-restart overlap).
+    Returns False when a healthy instance is already running: we signal it to
+    show its window and this launch should quietly exit."""
+    if not sys.platform.startswith("win"):
+        return True
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        mutex = k32.CreateMutexW(None, False, "Global\\MediaHotKey.SingleInstance")
+        if not mutex:
+            return True
+        _SINGLETON["mutex"] = mutex          # keep alive for process lifetime
+        _SINGLETON["show_event"] = k32.CreateEventW(
+            None, True, False, "Global\\MediaHotKey.ShowWindow")
+        WAIT_OBJECT_0, WAIT_ABANDONED = 0, 0x80
+        res = k32.WaitForSingleObject(mutex, int(timeout_s * 1000))
+        if res in (WAIT_OBJECT_0, WAIT_ABANDONED):
+            return True
+        if _SINGLETON["show_event"]:
+            k32.SetEvent(_SINGLETON["show_event"])
+        return False
+    except Exception:  # noqa: BLE001 — never block a launch on the guard
+        return True
+
+
 def _merge(dst, src):
     """In-place deep merge of src into dst (keeps the same dict object)."""
     for k, v in (src or {}).items():
@@ -261,7 +295,25 @@ class Api:
                 self._log(f"[health] slow now-playing tick: {dt:.1f}s — if "
                           "this coincides with a stutter, this thread is the "
                           "culprit")
+            self._check_show_signal()
             self._np_stop.wait(1.0)
+
+    def _check_show_signal(self):
+        """A second launch signals this named event instead of starting another
+        instance — bring our window up in response."""
+        ev = _SINGLETON.get("show_event")
+        if not ev or not sys.platform.startswith("win"):
+            return
+        try:
+            import ctypes
+            k32 = ctypes.windll.kernel32
+            if k32.WaitForSingleObject(ev, 0) == 0:      # signaled
+                k32.ResetEvent(ev)
+                self._log("[i] another launch detected — showing this window "
+                          "instead of starting a second copy.")
+                self.show_window()
+        except Exception:  # noqa: BLE001
+            pass
 
     def _np_tick(self):
         """One refresh pass — the body of the watcher loop."""
@@ -1127,6 +1179,12 @@ def main():
             "folder and run:\n\n    pip install -r requirements.txt",
             "MediaHotKey — missing dependency")
         sys.exit(1)
+
+    # One instance only — a second copy fighting over the WebView2 profile is
+    # what stalled launches for ~20s. If one is already running, just tell it
+    # to show its window and bow out.
+    if not _acquire_single_instance():
+        sys.exit(0)
 
     # If the WebView2 runtime is missing, a frameless window would just hang.
     # Tell the user and offer to download it instead of trapping them.

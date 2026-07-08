@@ -2,6 +2,18 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.40",
+        "notes": [
+            "Fixed launches sometimes hanging ~20s / 'Not Responding' right "
+            "after opening: starting MediaHotKey while another copy was "
+            "already running (hidden in the tray, or an old stuck one) made "
+            "the two fight over the same browser profile, stalling the new "
+            "window. The app is now single-instance — opening it again just "
+            "brings the existing window up instantly. Update restarts still "
+            "hand over cleanly (the new copy waits for the old one to exit).",
+        ],
+    },
+    {
         "version": "1.0.39",
         "notes": [
             "Network tuning from a real gaming-session log: Spotify API calls "
