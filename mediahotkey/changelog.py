@@ -2,6 +2,18 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.41",
+        "notes": [
+            "Big background-load cut, for 'the whole PC feels laggy while the "
+            "app is open': the connection to the Windows media service is now "
+            "reused instead of re-created every second, and when nothing is "
+            "on screen (window in the tray, no Mini/Taskbar overlay) the "
+            "media watcher idles at 5s instead of every second. Discord "
+            "posting is unaffected. Force-closing the app should no longer "
+            "feel like the fix.",
+        ],
+    },
+    {
         "version": "1.0.40",
         "notes": [
             "Fixed launches sometimes hanging ~20s / 'Not Responding' right "

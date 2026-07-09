@@ -228,6 +228,7 @@ class Api:
         self._overlay_sig_t = 0.0
         self._overlay_visible = {"mini": False, "bar": False}
         self._push_thread = None     # in-flight overlay push (never awaited)
+        self._ui_visible = True      # main window on screen (False = in tray)
         self._np_last_vol = None
         self._np_last_vol_t = 0.0
         self._np_thread = None
@@ -296,7 +297,12 @@ class Api:
                           "this coincides with a stutter, this thread is the "
                           "culprit")
             self._check_show_signal()
-            self._np_stop.wait(1.0)
+            # Nothing displaying (window in tray, no overlays)? Idle right
+            # down — the per-second media/COM churn otherwise runs all day in
+            # the background and was reported as making the whole PC feel
+            # laggy. Discord posting is unaffected (the engine poller does it).
+            idle = not (self._ui_visible or any(self._overlay_visible.values()))
+            self._np_stop.wait(5.0 if idle else 1.0)
 
     def _check_show_signal(self):
         """A second launch signals this named event instead of starting another
@@ -1005,6 +1011,7 @@ class Api:
             return True                # never crash the app on close
 
     def _hide_to_tray(self):
+        self._ui_visible = False
         try:
             self.window.hide()
         except Exception:  # noqa: BLE001
@@ -1017,6 +1024,7 @@ class Api:
                   "Use the tray icon to reopen or quit.")
 
     def show_window(self):
+        self._ui_visible = True
         try:
             self.window.show()
         except Exception:  # noqa: BLE001
@@ -1294,6 +1302,7 @@ def main():
         if start_hidden:
             api._ensure_tray()
             if api._tray is not None:
+                api._ui_visible = False
                 try:
                     api.window.hide()
                 except Exception:  # noqa: BLE001

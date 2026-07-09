@@ -172,6 +172,9 @@ class Engine:
         }
         # Cache the decoded SMTC cover so we don't re-encode it every poll.
         self._np_art_cache = {}
+        # Reused Windows media manager — requesting a fresh one every second
+        # is a cross-process call that adds steady background load system-wide.
+        self._smtc_mgr = None
         # De-duplicated diagnostic logging (logs only when a message changes).
         self._dbg_last = {}
 
@@ -799,8 +802,12 @@ class Engine:
             return None
         # NOTE: no try/except here — if the media manager itself fails, that's
         # systemic (e.g. a broken bundle), and it must surface in the Log via
-        # read_media_now_playing instead of silently blanking the panel.
-        mgr = await MediaManager.request_async()
+        # read_media_now_playing instead of silently blanking the panel
+        # (which also drops the cached manager so the next read reconnects).
+        mgr = self._smtc_mgr
+        if mgr is None:
+            mgr = await MediaManager.request_async()
+            self._smtc_mgr = mgr
         session = self._pick_now_playing_session(mgr)
         if session is None:
             self._dbg("smtc", "no session (or no Spotify session in Spotify mode)")
@@ -900,6 +907,7 @@ class Engine:
         try:
             return self._run_smtc(self._smtc_snapshot())
         except Exception as exc:  # noqa: BLE001
+            self._smtc_mgr = None    # reconnect on the next read
             # A real failure (not just "nothing playing") — put it in the Log,
             # throttled to once a minute, so a broken media reader is visible
             # instead of the panel just sitting on "not playing".
@@ -914,8 +922,12 @@ class Engine:
         if not MEDIA_AVAILABLE:
             return False
         try:
-            mgr = await MediaManager.request_async()
+            mgr = self._smtc_mgr
+            if mgr is None:
+                mgr = await MediaManager.request_async()
+                self._smtc_mgr = mgr
         except Exception:  # noqa: BLE001
+            self._smtc_mgr = None
             return False
         session = self._pick_now_playing_session(mgr)
         if session is None:
@@ -933,7 +945,9 @@ class Engine:
                 if attempt == 0:
                     await asyncio.sleep(0.2)
                     try:
+                        self._smtc_mgr = None   # stale — reconnect fresh
                         mgr = await MediaManager.request_async()
+                        self._smtc_mgr = mgr
                         session = self._pick_now_playing_session(mgr) or session
                     except Exception:  # noqa: BLE001
                         pass
