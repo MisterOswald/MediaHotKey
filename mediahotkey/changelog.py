@@ -2,6 +2,19 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.42",
+        "notes": [
+            "Fixed the media reader getting permanently stuck after switching "
+            "episodes/videos in a browser player (Crunchyroll etc.) — the "
+            "panel froze on the old thumbnail/track, mode switching didn't "
+            "help, and your log showed an endless 'media read failed: "
+            "TimeoutError' storm. Cause: cancelling a hung Windows-media call "
+            "poisoned the media stack. All media calls now run on a dedicated "
+            "worker that never cancels them — and if it ever truly wedges, it "
+            "resets itself within ~25s automatically. No more force-closing.",
+        ],
+    },
+    {
         "version": "1.0.41",
         "notes": [
             "Big background-load cut, for 'the whole PC feels laggy while the "

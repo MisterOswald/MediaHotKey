@@ -22,6 +22,7 @@ Two modes:
 import time
 import base64
 import asyncio
+import itertools
 import threading
 import os
 
@@ -138,6 +139,79 @@ def _build_session():
     return session
 
 
+class _MediaWorker:
+    """One persistent thread + asyncio loop for ALL Windows-media (WinRT)
+    calls.
+
+    Why not asyncio.run() per call: a torn-down media session (e.g. switching
+    episodes in a browser player) can hang the in-flight WinRT call, and the
+    old wait_for() timeout then CANCELLED it — which poisons pywinrt's async
+    state. From that point every media read timed out at 5s until the app was
+    force-closed (seen live in a user log as an endless 'media read failed:
+    TimeoutError' storm right after an episode switch).
+
+    Here a timeout only abandons the RESULT — the call is never cancelled and
+    may quietly finish in the background. If calls stay wedged for >25s the
+    whole worker thread is abandoned and a fresh one is built: a full media
+    reset without restarting the app."""
+
+    def __init__(self, log=lambda m: None, on_reset=lambda: None):
+        self._log = log
+        self._on_reset = on_reset
+        self._lock = threading.Lock()
+        self._loop = None
+        self._thread = None
+        self._inflight = {}          # call id -> started-at timestamp
+        self._ids = itertools.count()
+
+    def _ensure_locked(self):
+        if self._thread is None or not self._thread.is_alive():
+            loop = asyncio.new_event_loop()
+
+            def run():
+                asyncio.set_event_loop(loop)
+                loop.run_forever()
+
+            self._loop = loop
+            self._thread = threading.Thread(target=run, daemon=True,
+                                            name="mhk-media")
+            self._thread.start()
+        return self._loop
+
+    def call(self, coro, timeout):
+        with self._lock:
+            now = time.time()
+            oldest = min(self._inflight.values(), default=None)
+            if oldest is not None and now - oldest > 25:
+                # Wedged beyond hope — abandon the whole thread and start
+                # clean. (The stuck native call keeps the old daemon thread;
+                # it dies with the app.)
+                try:
+                    self._loop.call_soon_threadsafe(self._loop.stop)
+                except Exception:  # noqa: BLE001
+                    pass
+                self._loop = None
+                self._thread = None
+                self._inflight = {}
+                self._log("[!] media worker was stuck — reset it "
+                          "(no app restart needed)")
+                try:
+                    self._on_reset()
+                except Exception:  # noqa: BLE001
+                    pass
+            loop = self._ensure_locked()
+            key = next(self._ids)
+            self._inflight[key] = now
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        future.add_done_callback(lambda _f: self._inflight.pop(key, None))
+        try:
+            return future.result(timeout)
+        except TimeoutError:
+            # Deliberately NOT cancelling — see the class docstring.
+            raise TimeoutError(f"media call took longer than {timeout}s "
+                               "(media service busy — it will recover)")
+
+
 class Engine:
     """Owns the hotkeys, Spotify client, media control and Discord posting."""
 
@@ -175,6 +249,11 @@ class Engine:
         # Reused Windows media manager — requesting a fresh one every second
         # is a cross-process call that adds steady background load system-wide.
         self._smtc_mgr = None
+        # All WinRT media calls run on one persistent worker (see _MediaWorker
+        # for why); a worker reset also drops the cached manager.
+        self._media_worker = _MediaWorker(
+            log=self.log,
+            on_reset=lambda: setattr(self, "_smtc_mgr", None))
         # De-duplicated diagnostic logging (logs only when a message changes).
         self._dbg_last = {}
 
@@ -884,13 +963,11 @@ class Engine:
             "fetched_at": int(time.time() * 1000),
         }
 
-    @staticmethod
-    def _run_smtc(coro, timeout=SMTC_TIMEOUT):
-        """Run a WinRT coroutine with a hard timeout so a stuck native call
-        can't hang the caller forever. Returns None on timeout/error."""
-        async def _guarded():
-            return await asyncio.wait_for(coro, timeout)
-        return asyncio.run(_guarded())
+    def _run_smtc(self, coro, timeout=SMTC_TIMEOUT):
+        """Run a WinRT coroutine on the persistent media worker with a hard
+        timeout that never cancels the call (cancellation used to poison the
+        media stack — see _MediaWorker)."""
+        return self._media_worker.call(coro, timeout)
 
     def _smtc_no_props(self, aumid, why):
         """Log (throttled) a media session that exists but yields no track
@@ -1038,7 +1115,7 @@ class Engine:
                 self.notify_text("⚠️ media mode needs winsdk — run: pip install winsdk",
                                  "error")
                 return
-            result = asyncio.run(self._run_media(action))
+            result = self._run_smtc(self._run_media(action), timeout=10)
             if result is None:
                 self.notify_text("⚠️ media: no active session (is something playing "
                                  "in your browser?)", "error")
