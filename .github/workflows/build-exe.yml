@@ -39,7 +39,7 @@ jobs:
           $v = python -c "import mediahotkey; print(mediahotkey.__version__)"
           "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-      - name: Build MediaHotKey.exe
+      - name: Build MediaHotKey.exe (one-file, for existing installs)
         run: >
           pyinstaller --noconfirm --clean --onefile --windowed
           --name MediaHotKey
@@ -58,11 +58,38 @@ jobs:
           --exclude-module pydoc
           run.py
 
+      - name: Build folder version (fast launch)
+        run: >
+          pyinstaller --noconfirm --windowed
+          --name MediaHotKeyDir
+          --icon assets/icon.ico
+          --add-data "mediahotkey/web;mediahotkey/web"
+          --add-data "assets/icon.ico;assets"
+          --collect-all webview
+          --collect-all winsdk
+          --collect-all pycaw
+          --collect-all comtypes
+          --exclude-module tkinter
+          --exclude-module _tkinter
+          --exclude-module test
+          --exclude-module unittest
+          --exclude-module lib2to3
+          --exclude-module pydoc
+          run.py
+
+      - name: Package folder version
+        shell: pwsh
+        run: |
+          Rename-Item dist/MediaHotKeyDir/MediaHotKeyDir.exe MediaHotKey.exe
+          Compress-Archive -Path dist/MediaHotKeyDir/* -DestinationPath dist/MediaHotKey-win64.zip
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.ver.outputs.version }}
           name: v${{ steps.ver.outputs.version }}
           body: "Automated build of MediaHotKey v${{ steps.ver.outputs.version }}."
-          files: dist/MediaHotKey.exe
+          files: |
+            dist/MediaHotKey.exe
+            dist/MediaHotKey-win64.zip
           fail_on_unmatched_files: true

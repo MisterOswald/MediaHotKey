@@ -19,6 +19,7 @@ import os
 import re
 import sys
 import json
+import time
 import shutil
 import zipfile
 import tempfile
@@ -31,6 +32,7 @@ API_COMMITS = f"https://api.github.com/repos/{REPO}/commits/{BRANCH}"
 API_LATEST_RELEASE = f"https://api.github.com/repos/{REPO}/releases/latest"
 ZIP_URL = f"https://codeload.github.com/{REPO}/zip/refs/heads/{BRANCH}"
 EXE_DOWNLOAD = f"https://github.com/{REPO}/releases/latest/download/MediaHotKey.exe"
+ZIP_ASSET = "MediaHotKey-win64.zip"   # the fast-launch folder build
 UA = "MediaHotKey-Updater"
 
 # Never overwrite/copy these (version control + local-only state).
@@ -38,10 +40,23 @@ SKIP_TOP = {".git", ".github", ".mediahotkey_update.json", "config.json",
             ".spotify_token_cache"}
 
 _pending_exe = None  # (downloaded_path, current_exe_path) awaiting a restart swap
+_pending_dir = None  # staged folder-build awaiting a restart swap
 
 
 def is_frozen():
     return bool(getattr(sys, "frozen", False))
+
+
+def is_onedir():
+    """True when running the fast-launch folder build (exe + _internal\\)."""
+    return is_frozen() and os.path.isdir(
+        os.path.join(os.path.dirname(sys.executable), "_internal"))
+
+
+def app_home():
+    """Per-user install location for the folder build."""
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    return os.path.join(base, "MediaHotKey", "app")
 
 
 def install_dir():
@@ -173,9 +188,167 @@ def _apply_update_frozen(progress):
     return True, f"Update to {tag} downloaded. Click Restart to apply."
 
 
+# ---------------------------------------------------------------- folder build
+def _download(url, dest, timeout=600):
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    with urllib.request.urlopen(req, timeout=timeout) as r, open(dest, "wb") as fh:
+        shutil.copyfileobj(r, fh)
+
+
+def _find_app_root(directory):
+    """The folder inside an extracted zip that holds MediaHotKey.exe — the
+    directory itself, or its single subfolder (defensive against a zip with a
+    wrapping top-level folder)."""
+    if os.path.exists(os.path.join(directory, "MediaHotKey.exe")):
+        return directory
+    entries = [e for e in os.listdir(directory)
+               if os.path.isdir(os.path.join(directory, e))]
+    if len(entries) == 1:
+        sub = os.path.join(directory, entries[0])
+        if os.path.exists(os.path.join(sub, "MediaHotKey.exe")):
+            return sub
+    return None
+
+
+def _fetch_zip_to(url, staging, progress):
+    """Download + extract the folder-build zip into `staging`; return the app
+    root inside it, or None."""
+    shutil.rmtree(staging, ignore_errors=True)
+    os.makedirs(staging, exist_ok=True)
+    pkg = os.path.join(staging, "pkg.zip")
+    progress("downloading the fast-launch folder version…")
+    _download(url, pkg)
+    progress("unpacking…")
+    with zipfile.ZipFile(pkg) as z:
+        z.extractall(staging)
+    os.remove(pkg)
+    return _find_app_root(staging)
+
+
+def migrate_to_folder(progress=lambda m: None):
+    """One-file exe → folder build, installed to app_home(). Requires the
+    running version's release to carry the zip asset. Returns
+    (ok, message, new_exe_path_or_None); the caller then launch_migrated()s."""
+    from . import __version__
+    if not is_frozen() or is_onedir():
+        return False, "already the folder build", None
+    try:
+        rel = latest_release()
+    except Exception as exc:  # noqa: BLE001
+        return False, f"couldn't reach GitHub: {exc}", None
+    if _ver_tuple(rel.get("tag", "")) != _ver_tuple(__version__):
+        # Never migrate across versions — the normal exe update runs first.
+        return False, "no folder build published for this exact version", None
+    url = rel.get("assets", {}).get(ZIP_ASSET)
+    if not url:
+        return False, "this release has no folder-build asset", None
+    home = app_home()
+    staging = home + ".new"
+    try:
+        root = _fetch_zip_to(url, staging, progress)
+        if root is None:
+            shutil.rmtree(staging, ignore_errors=True)
+            return False, "downloaded archive didn't contain MediaHotKey.exe", None
+        old = home + ".old"
+        shutil.rmtree(old, ignore_errors=True)
+        if os.path.isdir(home):
+            try:
+                os.replace(home, old)
+            except OSError:
+                shutil.rmtree(home, ignore_errors=True)
+        os.makedirs(os.path.dirname(home), exist_ok=True)
+        os.replace(root, home)
+        shutil.rmtree(staging, ignore_errors=True)
+        shutil.rmtree(old, ignore_errors=True)
+        return True, "folder version installed", os.path.join(home, "MediaHotKey.exe")
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(staging, ignore_errors=True)
+        return False, f"migration failed: {exc}", None
+
+
+def launch_migrated(new_exe):
+    """Start the freshly installed folder build; it deletes this one-file exe
+    once we've exited (MHK_REMOVE_OLD) and refreshes the desktop shortcut."""
+    env = _child_env()
+    env["MHK_REMOVE_OLD"] = sys.executable
+    try:
+        subprocess.Popen([new_exe], cwd=os.path.dirname(new_exe),
+                         close_fds=True, env=env)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _apply_update_onedir(progress):
+    """Folder-build self-update: stage the new version next to the install;
+    the swap happens on restart via MHK_FINISH_UPDATE."""
+    global _pending_dir
+    from . import __version__
+    try:
+        rel = latest_release()
+    except Exception as exc:  # noqa: BLE001
+        return False, f"Couldn't reach GitHub: {exc}"
+    tag = rel.get("tag", "")
+    if _ver_tuple(tag) <= _ver_tuple(__version__):
+        return False, f"You're already on the latest version ({__version__})."
+    url = rel.get("assets", {}).get(ZIP_ASSET)
+    if not url:
+        return False, f"Release {tag} has no folder-build package yet."
+    staging = os.path.join(install_dir(), "update_staging")
+    progress(f"Downloading {tag}…")
+    try:
+        root = _fetch_zip_to(url, staging, progress)
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(staging, ignore_errors=True)
+        return False, f"Download failed: {exc}"
+    if root is None:
+        shutil.rmtree(staging, ignore_errors=True)
+        return False, "Downloaded package looked wrong — try again in a minute."
+    _pending_dir = root
+    return True, f"Update to {tag} downloaded. Click Restart to apply."
+
+
+def finish_update_if_needed():
+    """When started from update_staging with MHK_FINISH_UPDATE=<install dir>,
+    copy ourselves over the (now-exited) old install and relaunch from there.
+    Returns True when the caller must exit immediately."""
+    target = os.environ.get("MHK_FINISH_UPDATE")
+    if not target or not is_frozen():
+        return False
+    me = os.path.dirname(sys.executable)
+    exe = os.path.join(target, "MediaHotKey.exe")
+    # Wait for the old process to fully exit (its exe becomes writable).
+    for _ in range(60):
+        try:
+            if not os.path.exists(exe):
+                break
+            with open(exe, "ab"):
+                break
+        except OSError:
+            time.sleep(0.5)
+    for _ in range(3):
+        try:
+            internal = os.path.join(target, "_internal")
+            if os.path.isdir(internal):
+                shutil.rmtree(internal)
+            if os.path.exists(exe):
+                os.remove(exe)
+            break
+        except OSError:
+            time.sleep(1.0)
+    # COPY (not move) — our own _internal is memory-mapped while we run, and
+    # the staging leftovers are cleaned up by the next normal start.
+    shutil.copytree(me, target, dirs_exist_ok=True)
+    env = _child_env()
+    subprocess.Popen([exe], cwd=target, close_fds=True, env=env)
+    return True
+
+
 def apply_update(progress=lambda m: None):
     """Download + install the latest version. Returns (ok, message)."""
     if is_frozen():
+        if is_onedir():
+            return _apply_update_onedir(progress)
         return _apply_update_frozen(progress)
 
     # The API (sha) may be rate-limited/blocked even when the zip host works,
@@ -225,6 +398,11 @@ def cleanup_stale():
                 os.remove(p)
         except OSError:
             pass
+    if is_onedir():
+        shutil.rmtree(os.path.join(install_dir(), "update_staging"),
+                      ignore_errors=True)
+    for d in (app_home() + ".new", app_home() + ".old"):
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def _child_env():
@@ -235,7 +413,8 @@ def _child_env():
     directory' warning. Strip them so the new exe extracts its own copy."""
     env = os.environ.copy()
     for k in ("_MEIPASS2", "_PYI_APPLICATION_HOME_DIR", "_PYI_ARCHIVE_FILE",
-              "_PYIBoot_SPLASH", "_MEIPASS"):
+              "_PYIBoot_SPLASH", "_MEIPASS",
+              "MHK_FINISH_UPDATE", "MHK_REMOVE_OLD"):
         env.pop(k, None)
     return env
 
@@ -277,6 +456,12 @@ def relaunch():
     build with a downloaded update pending, swap the exe in first."""
     try:
         if is_frozen():
+            if _pending_dir:
+                exe = os.path.join(_pending_dir, "MediaHotKey.exe")
+                env = _child_env()
+                env["MHK_FINISH_UPDATE"] = install_dir()
+                subprocess.Popen([exe], cwd=_pending_dir, close_fds=True, env=env)
+                return True
             if _pending_exe:
                 return _swap_and_launch(*_pending_exe)
             subprocess.Popen([sys.executable], cwd=install_dir(), close_fds=True,

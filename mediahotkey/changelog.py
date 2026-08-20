@@ -2,6 +2,23 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.43",
+        "notes": [
+            "The big one for slow launches: the app now switches itself to a "
+            "FAST-LAUNCH folder build. The old single .exe unpacked the whole "
+            "app on every start, and antivirus rescanned that fresh unpack — "
+            "the ~20-second 'Not Responding' launches (worst on the first "
+            "launch of a day). The folder build lives in your user app-data "
+            "folder, keeps stable files antivirus only scans once, and starts "
+            "in a couple of seconds every time.",
+            "The switch is automatic: shortly after this version starts it "
+            "installs the folder version in the background, restarts into it, "
+            "refreshes the desktop shortcut, and removes the old single exe. "
+            "Settings, sign-ins and logs are untouched (they live in AppData). "
+            "Future updates stage-and-swap cleanly within the folder build.",
+        ],
+    },
+    {
         "version": "1.0.42",
         "notes": [
             "Fixed the media reader getting permanently stuck after switching "

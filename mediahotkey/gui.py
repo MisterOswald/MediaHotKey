@@ -1181,6 +1181,16 @@ def _apply_window_icon(retries=12):
 
 
 def main():
+    # Started from update_staging to finish a folder-build update? Do the swap
+    # and relaunch from the final location — no window in this process.
+    try:
+        if updater.finish_update_if_needed():
+            sys.exit(0)
+    except SystemExit:
+        raise
+    except Exception:  # noqa: BLE001 — never block a normal launch on this
+        pass
+
     if webview is None:
         _message_box(
             "pywebview isn't installed.\n\nOpen a terminal in the MediaHotKey "
@@ -1321,6 +1331,48 @@ def main():
                 api.engine.start()
             except Exception as exc:  # noqa: BLE001
                 api._log(f"[!] {exc}")
+        # Just migrated from the one-file exe? Delete it once it has exited,
+        # and refresh the desktop shortcut to point here.
+        old_exe = os.environ.pop("MHK_REMOVE_OLD", None)
+        if old_exe:
+            api._log("[i] upgraded to the fast-launch folder version 🎉 — "
+                     "no more unpacking on every start, so launches should "
+                     "be quick every time now.")
+            try:
+                api.create_shortcut()
+            except Exception:  # noqa: BLE001
+                pass
+
+            def _delete_when_free(path):
+                for _ in range(60):
+                    try:
+                        if os.path.exists(path):
+                            os.remove(path)
+                        return
+                    except OSError:
+                        time.sleep(0.5)
+            threading.Thread(target=_delete_when_free, args=(old_exe,),
+                             daemon=True).start()
+
+        # Running the old one-file build? Switch to the folder build in the
+        # background: same version, same data, installed under LOCALAPPDATA —
+        # this removes the per-launch unpack that antivirus rescans (the ~20s
+        # first-launch-of-the-day hangs).
+        if updater.is_frozen() and not updater.is_onedir():
+            def _migrate():
+                ok, msg, new_exe = updater.migrate_to_folder(
+                    progress=lambda m: api._log(f"[update] {m}"))
+                if ok and new_exe and updater.launch_migrated(new_exe):
+                    api._log("[update] restarting into the fast-launch "
+                             "folder version…")
+                    api._quit_app()
+                elif not ok:
+                    api._log(f"[update] folder migration skipped: {msg}")
+            threading.Timer(
+                3.0,
+                lambda: threading.Thread(target=_migrate,
+                                         daemon=True).start()).start()
+
         # Start the now-playing watcher now that the window is up, and defer the
         # update check a few seconds so neither competes with WebView2's init.
         api.start_now_playing()
