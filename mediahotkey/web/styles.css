@@ -245,3 +245,70 @@ input.field::placeholder { color: #c7b594; }
   background: rgba(87,71,52,.95); color: #fff; padding: 11px 20px; border-radius: 10px;
   font: 600 13.5px var(--ui); opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 50; }
 .toast.show { opacity: 1; }
+
+/* ---------- compact mode (mini / taskbar strip inside the main window) ---- */
+body.compact .app, body.compact-bar .app { display: none; }
+body.compact, body.compact-bar { overflow: hidden; }
+
+#compact { display: none; }
+body.compact #compact, body.compact-bar #compact {
+  display: flex; flex-direction: column; height: 100vh;
+  padding: 8px 12px 12px; box-sizing: border-box;
+  background: linear-gradient(170deg, #FBF3E3, #F4E8CE); user-select: none; }
+
+.c-top { display: flex; align-items: center; justify-content: space-between;
+  height: 20px; flex: none; }
+.c-grip { font: 700 9px var(--mono); letter-spacing: .16em; color: #C0925A; }
+.c-exit { border: 0; background: none; cursor: pointer; color: var(--terra);
+  font-size: 14px; padding: 0 4px; line-height: 1; }
+.c-art { width: 100%; flex: 1 1 auto; min-height: 110px; border-radius: 12px;
+  border: 2px dashed #E0C99A; background-size: contain; background-repeat: no-repeat;
+  background-position: center; margin: 6px 0; background-color: rgba(0,0,0,.03); }
+.c-art.filled { border-style: solid; border-color: var(--panel-border); }
+.c-t { font: 700 16px var(--ui); color: var(--ink); line-height: 1.15;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.c-a { font: 500 12.5px var(--ui); color: var(--muted); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.c-barwrap { margin: 7px 0 2px; }
+.c-pbar { height: 5px; border-radius: 5px; background: var(--panel-border); overflow: hidden; }
+.c-fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--terra-top), var(--terra)); }
+.c-times { display: flex; justify-content: space-between;
+  font: 500 10px var(--mono); color: var(--faint); margin-top: 3px; }
+.c-row { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 8px; }
+.c-tbtn { width: 34px; height: 34px; border-radius: 50%; background: var(--card);
+  border: 1px solid var(--field-border); display: flex; align-items: center;
+  justify-content: center; color: #8a7558; cursor: pointer; font-size: 13px; }
+.c-tbtn.play { width: 44px; height: 44px; color: #fff; font-size: 16px; border: 0;
+  background: linear-gradient(135deg, var(--terra-top), var(--terra));
+  box-shadow: 0 6px 14px -5px rgba(204,126,79,.55); }
+.c-tbtn:active, .c-sbtn:active { transform: translateY(1px); }
+.c-vol, .c-acts { display: flex; gap: 8px; margin-top: 9px; align-items: center; }
+.c-sbtn { flex: 1; padding: 7px 0; border-radius: 9px; border: 1px solid var(--field-border);
+  background: var(--card); color: #8a7558; font: 600 13px var(--ui); cursor: pointer; }
+.c-vol .c-sbtn { flex: none; width: 34px; padding: 6px 0; font-size: 14px; }
+.c-sbtn.add { border: 0; color: #fff; background: linear-gradient(135deg, var(--terra-top), var(--terra)); }
+.c-acts .c-sbtn:last-child { flex: none; width: 34px; }
+.c-vrange { flex: 1; -webkit-appearance: none; appearance: none; height: 6px;
+  border-radius: 6px; background: var(--panel-border); outline: none; cursor: pointer; }
+.c-vrange::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
+  width: 15px; height: 15px; border-radius: 50%; background: var(--terra);
+  border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.c-vpct { flex: none; width: 34px; text-align: right; font: 600 11px var(--mono); color: var(--muted); }
+
+/* bar variant: one slim horizontal strip */
+body.compact-bar #compact { flex-direction: row; align-items: center; gap: 9px;
+  padding: 6px 10px; position: relative; }
+body.compact-bar .c-top { order: 9; height: auto; }
+body.compact-bar .c-grip { display: none; }
+body.compact-bar .c-art { flex: none; width: 40px; height: 40px; min-height: 0;
+  margin: 0; border-radius: 8px; border-width: 1px; background-size: cover; }
+body.compact-bar .c-meta { flex: 1 1 auto; min-width: 0; }
+body.compact-bar .c-t { font-size: 12.5px; }
+body.compact-bar .c-a { font-size: 10.5px; }
+body.compact-bar .c-barwrap { position: absolute; left: 0; right: 0; bottom: 0; margin: 0; }
+body.compact-bar .c-pbar { height: 3px; border-radius: 0; background: transparent; }
+body.compact-bar .c-times { display: none; }
+body.compact-bar .c-row { margin: 0; gap: 5px; flex: none; }
+body.compact-bar .c-tbtn { width: 26px; height: 26px; font-size: 11px; }
+body.compact-bar .c-tbtn.play { width: 30px; height: 30px; font-size: 12px; }
+body.compact-bar .c-vol, body.compact-bar .c-acts { display: none; }

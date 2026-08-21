@@ -164,8 +164,8 @@
         <button class="np-act like" id="np-like" title="Save to Liked Songs (Spotify)">♥</button>
       </div>
       <div class="np-minis">
-        <button class="np-mini" id="btn-mini" title="Open the full always-on-top mini player (cover, volume, add/like)">🗗 Mini player</button>
-        <button class="np-mini" id="btn-bar" title="Open a tiny strip to hover over your taskbar while gaming in windowed mode">▭ Taskbar bar</button>
+        <button class="np-mini" id="btn-mini" title="Shrink into a small always-on-top player (cover, volume, add/like)">🗗 Mini player</button>
+        <button class="np-mini" id="btn-bar" title="Shrink into a tiny strip to hover over your taskbar while gaming in windowed mode">▭ Taskbar bar</button>
       </div>
     </div>
   </div>
@@ -180,6 +180,42 @@
   </div>
 
 </div>
+
+<!-- Compact mode: the SAME window shrunk into a small always-on-top player
+     (mini card or taskbar strip). Rendered from the same now-playing state as
+     the main panel, so it can never freeze or desync like the old separate
+     overlay windows did. -->
+<div id="compact" hidden>
+  <div class="c-top">
+    <span class="c-grip">♪ MEDIAHOTKEY</span>
+    <button class="c-exit" id="c-exit" title="Back to the full window">⤢</button>
+  </div>
+  <div class="c-art" id="c-art"></div>
+  <div class="c-meta">
+    <div class="c-t" id="c-t">—</div>
+    <div class="c-a" id="c-a">not playing</div>
+  </div>
+  <div class="c-barwrap">
+    <div class="c-pbar"><div class="c-fill" id="c-fill"></div></div>
+    <div class="c-times"><span id="c-cur">0:00</span><span id="c-dur">0:00</span></div>
+  </div>
+  <div class="c-row">
+    <div class="c-tbtn" id="c-prev" title="Previous">⏮</div>
+    <div class="c-tbtn play" id="c-play" title="Play / pause">❚❚</div>
+    <div class="c-tbtn" id="c-next" title="Next">⏭</div>
+  </div>
+  <div class="c-vol">
+    <button class="c-sbtn" id="c-vdown">🔉</button>
+    <input type="range" min="0" max="100" value="50" class="c-vrange" id="c-vrange">
+    <button class="c-sbtn" id="c-vup">🔊</button>
+    <span class="c-vpct" id="c-vpct">—</span>
+  </div>
+  <div class="c-acts">
+    <button class="c-sbtn add" id="c-add">＋ Add to playlist</button>
+    <button class="c-sbtn" id="c-like" title="Like">♥</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 <script src="app.js"></script>
 </body>

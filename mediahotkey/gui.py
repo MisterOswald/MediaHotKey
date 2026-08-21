@@ -205,8 +205,6 @@ class Api:
         # fact — crucial for diagnosing issues that build up over hours.
         self._log_path = os.path.join(config_dir(), "activity.log")
         self.window = None
-        self.mini_window = None
-        self.bar_window = None
         self._allow_close = False
         self._tray = None
         self.engine = Engine(self.config, log=self._log,
@@ -224,10 +222,7 @@ class Api:
         self._np_last_sig_t = 0.0
         self._np_np_sig = None       # poll() de-dupe
         self._np_np_sig_t = 0.0
-        self._overlay_sig = None     # _push_overlays() de-dupe
-        self._overlay_sig_t = 0.0
-        self._overlay_visible = {"mini": False, "bar": False}
-        self._push_thread = None     # in-flight overlay push (never awaited)
+        self._compact_prev = None    # (w, h) before entering compact mode
         self._ui_visible = True      # main window on screen (False = in tray)
         self._np_last_vol = None
         self._np_last_vol_t = 0.0
@@ -301,7 +296,7 @@ class Api:
             # down — the per-second media/COM churn otherwise runs all day in
             # the background and was reported as making the whole PC feel
             # laggy. Discord posting is unaffected (the engine poller does it).
-            idle = not (self._ui_visible or any(self._overlay_visible.values()))
+            idle = not self._ui_visible
             self._np_stop.wait(5.0 if idle else 1.0)
 
     def _check_show_signal(self):
@@ -405,11 +400,6 @@ class Api:
                 last = dict(self.engine.now_playing)
                 last["is_playing"] = False
                 self.engine.now_playing = last
-        # Push to any open overlay (mini / taskbar bar). The overlays do
-        # NOT poll our js_api — a 2nd pywebview window calling back into
-        # Python every second saturates the shared GUI-thread bridge and
-        # freezes the whole app. Pushing one-way (Python -> JS) avoids that.
-        self._push_overlays(self.engine.now_playing)
 
     # -- health telemetry --------------------------------------------------
     def _health_loop(self):
@@ -477,64 +467,6 @@ class Api:
         else:
             parts.append("spotify-api 0 calls")
         return "[health] " + " · ".join(parts)
-
-    def _push_overlays(self, np):
-        """Send now-playing to each VISIBLE overlay window. Called from the
-        now-playing loop, so it must NEVER block:
-
-        - pywebview's evaluate_js can wait forever on a hidden/suspended
-          WebView2 renderer (WebView2 throttles hidden windows, and 'closing'
-          an overlay only hides it) — one wedged call used to freeze the whole
-          watcher, leaving the panel stuck on the previous song.
-        - So the actual evaluate_js runs on a throwaway thread; if that thread
-          is still busy at the next tick, the push is skipped and (throttled)
-          logged instead of piling up or blocking.
-
-        Every outcome is observable: the injected expression returns a marker
-        ('ok' / 'no-render-fn'), and failures land in the Log. The overlays
-        also self-heal: if no push arrives for ~10s they fall back to a slow
-        poll_np pull."""
-        targets = [(kind, win) for kind, win
-                   in (("mini", self.mini_window), ("bar", self.bar_window))
-                   if win is not None and self._overlay_visible.get(kind)]
-        if not targets:
-            return
-        sig = self._np_sig(np)
-        now = time.time()
-        if sig == self._overlay_sig and (now - self._overlay_sig_t) < 5:
-            return
-        self._overlay_sig = sig
-        self._overlay_sig_t = now
-        prev = self._push_thread
-        if prev is not None and prev.is_alive():
-            if now - getattr(self, "_push_stuck_t", 0) > 60:
-                self._push_stuck_t = now
-                self._log("[!] overlay push still in flight — skipping this "
-                          "one (an overlay window may be suspended)")
-            return
-        try:
-            payload = json.dumps(np or {})
-        except Exception:  # noqa: BLE001
-            return
-        script = (f"window.mhkRender ? (window.mhkRender({payload}), 'ok') "
-                  ": 'no-render-fn'")
-        self._push_thread = threading.Thread(
-            target=self._do_push, args=(script, targets), daemon=True)
-        self._push_thread.start()
-
-    def _do_push(self, script, targets):
-        for kind, win in targets:
-            try:
-                result = win.evaluate_js(script)
-                problem = None if result == "ok" else f"returned {result!r}"
-            except Exception as exc:  # noqa: BLE001
-                problem = f"{type(exc).__name__}: {exc}"
-            if problem:
-                key = f"_push_err_t_{kind}"
-                now = time.time()
-                if now - getattr(self, key, 0) > 60:
-                    setattr(self, key, now)
-                    self._log(f"[!] {kind} overlay push failed: {problem}")
 
     # -- config -----------------------------------------------------------
     def _apply(self, cfg):
@@ -724,100 +656,36 @@ class Api:
         self.engine.set_volume(percent)
         return {"ok": True}
 
-    # -- mini player (separate always-on-top overlay window) --------------
-    def poll_np(self):
-        """Lightweight feed for an overlay window (mini / taskbar bar) — just
-        the now-playing data (the main poll() also returns logs/state, which is
-        needless traffic across a second window's bridge).
-
-        NOTE: takes NO arguments on purpose. A secondary pywebview window
-        calling a js_api method WITH an argument on a repeating timer wedges the
-        shared bridge (both windows go 'Not Responding'), so overlays call this
-        arg-less and we just hand back the current now-playing every tick — the
-        overlay is short-lived, so the extra traffic is negligible."""
-        return {"now_playing": self.engine.now_playing}
-
-    def open_mini(self):
-        # Create the window directly on the GUI thread (NOT a worker thread —
-        # a WebView2 window made off-thread appears but never pumps messages,
-        # which looked like a freeze). Create once, then show on later opens.
+    # -- compact (mini) mode ----------------------------------------------
+    def set_compact(self, mode=None):
+        """Turn the MAIN window into a small always-on-top player ('mini' or
+        'bar'), or back to the full window (mode=None). The old separate
+        overlay windows fought the shared WebView2 bridge for 10+ versions
+        (freezes, blank cards); the compact mode is the same window and the
+        same data pipeline as the panel, so it can never desync."""
         try:
-            if self.mini_window is None:
-                mini_index = os.path.join(_resource_dir(), "mini.html")
-                self.mini_window = webview.create_window(
-                    "MediaHotKey Mini", url=mini_index, js_api=self,
-                    width=300, height=448, resizable=False, frameless=True,
-                    on_top=True, background_color="#F6EFE1")
-
-                def _closed(*_a):
-                    self.mini_window = None
-                    self._overlay_visible["mini"] = False
+            w = self.window
+            if mode:
+                if self._compact_prev is None:
+                    self._compact_prev = (w.width, w.height)
+                width, height = (320, 500) if mode == "mini" else (500, 92)
+                w.resize(width, height)
                 try:
-                    self.mini_window.events.closed += _closed
+                    w.on_top = True
                 except Exception:  # noqa: BLE001
                     pass
             else:
-                self.mini_window.show()
-        except Exception as exc:  # noqa: BLE001
-            self._log(f"[!] mini player: {exc}")
-            self.mini_window = None
-            self._overlay_visible["mini"] = False
-            return {"ok": False, "msg": str(exc)}
-        self._overlay_visible["mini"] = True
-        self._overlay_sig = None   # force an immediate now-playing push
-        return {"ok": True}
-
-    def close_mini(self):
-        # Closing only HIDES the window (cheap re-open). Mark it not-visible so
-        # pushes stop — WebView2 suspends hidden renderers and a push into one
-        # can hang.
-        self._overlay_visible["mini"] = False
-        if self.mini_window is not None:
-            try:
-                self.mini_window.hide()
-            except Exception:  # noqa: BLE001
-                pass
-        return {"ok": True}
-
-    def open_bar(self):
-        """A tiny horizontal strip (cover + title + prev/play/next) meant to
-        hover over the Windows taskbar while gaming in windowed mode. Same
-        rules as open_mini: created directly on the GUI thread, once."""
-        try:
-            if self.bar_window is None:
-                bar_index = os.path.join(_resource_dir(), "bar.html")
-                self.bar_window = webview.create_window(
-                    "MediaHotKey Bar", url=bar_index, js_api=self,
-                    width=460, height=54, resizable=False, frameless=True,
-                    on_top=True, background_color="#F6EFE1")
-
-                def _closed(*_a):
-                    self.bar_window = None
-                    self._overlay_visible["bar"] = False
                 try:
-                    self.bar_window.events.closed += _closed
+                    w.on_top = False
                 except Exception:  # noqa: BLE001
                     pass
-            else:
-                self.bar_window.show()
+                prev = self._compact_prev or (1120, 860)
+                self._compact_prev = None
+                w.resize(*prev)
+            return {"ok": True}
         except Exception as exc:  # noqa: BLE001
-            self._log(f"[!] taskbar player: {exc}")
-            self.bar_window = None
-            self._overlay_visible["bar"] = False
+            self._log(f"[!] compact mode: {exc}")
             return {"ok": False, "msg": str(exc)}
-        self._overlay_visible["bar"] = True
-        self._overlay_sig = None   # force an immediate now-playing push
-        return {"ok": True}
-
-    def close_bar(self):
-        # See close_mini — hidden renderers must not receive pushes.
-        self._overlay_visible["bar"] = False
-        if self.bar_window is not None:
-            try:
-                self.bar_window.hide()
-            except Exception:  # noqa: BLE001
-                pass
-        return {"ok": True}
 
     # -- tests ------------------------------------------------------------
     def test_spotify(self, cfg=None):
@@ -1074,14 +942,6 @@ class Api:
                 self._tray.stop()
             except Exception:  # noqa: BLE001
                 pass
-        for attr in ("mini_window", "bar_window"):
-            win = getattr(self, attr, None)
-            if win is not None:
-                try:
-                    win.destroy()
-                except Exception:  # noqa: BLE001
-                    pass
-                setattr(self, attr, None)
         try:
             self.window.destroy()
         except Exception:  # noqa: BLE001

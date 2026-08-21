@@ -2,6 +2,19 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.44",
+        "notes": [
+            "Rebuilt the Mini player and Taskbar bar so they can never freeze "
+            "or show a blank card again: instead of opening a second window "
+            "(which fought the app's internals for 10+ versions — the hitch "
+            "on open, the 'not playing' blank, the desyncs), the MAIN window "
+            "itself now shrinks into a small always-on-top player — same "
+            "clean design, same live data as the panel, updates instantly. "
+            "The ⤢ button brings back the full window. Opening is instant "
+            "with no system hitch.",
+        ],
+    },
+    {
         "version": "1.0.43",
         "notes": [
             "The big one for slow launches: the app now switches itself to a "

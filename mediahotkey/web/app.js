@@ -69,11 +69,7 @@ const MOCK = {
   set_volume: async () => ({ ok: true }),
   add_to_playlist: async () => ({ ok: true }),
   like: async () => ({ ok: true }),
-  poll_np: async () => ({ now_playing: DEMO.now_playing }),
-  open_mini: async () => ({ ok: true }),
-  close_mini: async () => ({ ok: true }),
-  open_bar: async () => ({ ok: true }),
-  close_bar: async () => ({ ok: true }),
+  set_compact: async () => ({ ok: true }),
   test_spotify: async () => ({ ok: true, msg: 'Connected to Spotify (nothing playing right now)' }),
   test_discord: async () => ({ ok: true, msg: 'Test message sent. Check your channel.' }),
   record_hotkey: async () => '', open_url: () => {}, choose_mascot: async () => '',
@@ -210,6 +206,9 @@ function setArt(url) {
 }
 
 let curNP = null;        // last now-playing payload from the backend
+let compactMode = null;  // null | 'mini' | 'bar'
+let lastCArt = '';
+
 function renderNowPlaying(np) {
   np = np || {};
   curNP = np;
@@ -223,7 +222,40 @@ function renderNowPlaying(np) {
   } else if (!volDragging) {
     $('#vol-pct').textContent = '—';
   }
+  // Mirror into the compact card (same window, same data — can't desync).
+  $('#c-t').textContent = np.title || '—';
+  $('#c-a').textContent = np.artist || (np.title ? '' : 'not playing');
+  $('#c-play').textContent = np.is_playing ? '❚❚' : '▶';
+  const cart = np.art_url || mascotImage || '';
+  if (cart !== lastCArt) {
+    lastCArt = cart;
+    $('#c-art').style.backgroundImage = cart ? `url("${cart}")` : '';
+    $('#c-art').classList.toggle('filled', !!cart);
+  }
+  if (np.volume != null && np.volume !== undefined) {
+    $('#c-vpct').textContent = np.volume + '%';
+    if (!volDragging) $('#c-vrange').value = np.volume;
+  } else if (!volDragging) {
+    $('#c-vpct').textContent = '—';
+  }
   tickProgress();
+}
+
+async function enterCompact(mode) {
+  compactMode = mode;
+  document.body.classList.toggle('compact', mode === 'mini');
+  document.body.classList.toggle('compact-bar', mode === 'bar');
+  $('#compact').hidden = false;
+  renderNowPlaying(curNP);
+  const r = await api().set_compact(mode);
+  if (r && r.ok === false) { exitCompact(); toast(r.msg || 'Compact mode failed'); }
+}
+
+async function exitCompact() {
+  compactMode = null;
+  document.body.classList.remove('compact', 'compact-bar');
+  $('#compact').hidden = true;
+  await api().set_compact(null);
 }
 
 // Advance the progress bar smoothly between backend updates by extrapolating
@@ -238,6 +270,9 @@ function tickProgress() {
   $('#np-cur').textContent = fmt(cur);
   $('#np-dur').textContent = fmt(dur);
   $('#np-fill').style.width = dur ? Math.min(100, cur / dur * 100) + '%' : '0';
+  $('#c-cur').textContent = fmt(cur);
+  $('#c-dur').textContent = fmt(dur);
+  $('#c-fill').style.width = dur ? Math.min(100, cur / dur * 100) + '%' : '0';
 }
 setInterval(tickProgress, 500);
 
@@ -335,15 +370,24 @@ function wire() {
     await api().set_volume(parseInt($('#vol-range').value, 10));
     setTimeout(() => { volDragging = false; }, 400);
   };
-  $('#btn-mini').onclick = async () => {
-    const r = await api().open_mini();
-    toast(r && r.ok === false ? (r.msg || 'Mini player failed') : 'Mini player opened');
+  $('#btn-mini').onclick = () => enterCompact('mini');
+  $('#btn-bar').onclick = () => enterCompact('bar');
+  $('#c-exit').onclick = () => exitCompact();
+  $('#c-prev').onclick = () => api().transport('prev', cfg);
+  $('#c-play').onclick = () => api().transport('playpause', cfg);
+  $('#c-next').onclick = () => api().transport('next', cfg);
+  $('#c-vdown').onclick = () => api().volume('down');
+  $('#c-vup').onclick = () => api().volume('up');
+  $('#c-vrange').oninput = () => {
+    volDragging = true;
+    $('#c-vpct').textContent = $('#c-vrange').value + '%';
   };
-  $('#btn-bar').onclick = async () => {
-    const r = await api().open_bar();
-    toast(r && r.ok === false ? (r.msg || 'Taskbar bar failed')
-                              : 'Taskbar bar opened — drag it over your taskbar');
+  $('#c-vrange').onchange = async () => {
+    await api().set_volume(parseInt($('#c-vrange').value, 10));
+    setTimeout(() => { volDragging = false; }, 400);
   };
+  $('#c-add').onclick = () => api().add_to_playlist();
+  $('#c-like').onclick = () => api().like();
 
   $('#btn-check-update').onclick = async () => {
     $('#upd-status').textContent = 'checking…';

@@ -1,4 +1,4 @@
 """MediaHotKey — Spotify + universal media hotkeys with a desktop UI."""
 
-__version__ = "1.0.43"
+__version__ = "1.0.44"
 __app_name__ = "MediaHotKey"
