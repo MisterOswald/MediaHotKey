@@ -335,15 +335,21 @@ class Api:
         # (min 3s), and the cache window sits just under it so the watcher
         # and the Discord poller share ~1 API call per interval total.
         is_spotify_app = bool(np and "spotify" in (np.get("app") or ""))
-        if can_spotify and (np is None or is_spotify_app):
+        # Only read the Web API while the window is actually VISIBLE — when
+        # hidden, the engine poller already keeps now_playing + Discord fed,
+        # and the watcher hammering the API on top of it (24/7 sessions) is
+        # what got the app rate-limited by Spotify.
+        if can_spotify and self._ui_visible and (np is None or is_spotify_app):
             try:
                 sp_iv = max(3, int(self.config["settings"].get("poll_interval", 5)))
             except (TypeError, ValueError):
                 sp_iv = 5
             if now - self._np_last_spotify_t >= sp_iv:
                 self._np_last_spotify_t = now
+                # Cache window ABOVE the poller's interval so this read almost
+                # always free-rides on the poller's fetch instead of adding one.
                 self._np_last_spotify = self.engine.read_spotify_now_playing(
-                    max_age=max(2.5, sp_iv - 0.5))
+                    max_age=sp_iv + 2)
             if self._np_last_spotify:
                 np = self._np_last_spotify
 
@@ -459,6 +465,11 @@ class Api:
         if n:
             parts.append(f"np-tick avg {total / n * 1000:.0f}ms "
                          f"max {mx * 1000:.0f}ms")
+        elif self._np_thread is not None and self._np_thread.is_alive():
+            # The thread exists but completed zero ticks in 30s — it's stuck
+            # inside a call. This exact signature (silent, hours long) is how
+            # the Retry-After sleep wedge was finally caught.
+            parts.append("np-tick STALLED (watcher stuck inside a call)")
         net = self.engine.net_snapshot()
         if net["n"]:
             parts.append(f"spotify-api {net['n']} calls "
@@ -761,6 +772,11 @@ class Api:
                 return {"ok": True, "msg": f"Connected — now playing: {pb['item']['name']}"}
             return {"ok": True, "msg": "Connected to Spotify (nothing playing right now)"}
         except Exception as exc:  # noqa: BLE001
+            if getattr(exc, "http_status", None) == 429:
+                return {"ok": False, "msg":
+                        "Spotify is rate-limiting the app right now (too many "
+                        "requests over a long session). You're still signed in "
+                        "— wait a few minutes and everything resumes by itself."}
             return {"ok": False, "msg": str(exc)}
 
     def test_discord(self, cfg=None):

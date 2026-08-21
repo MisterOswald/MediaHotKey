@@ -2,6 +2,27 @@
 
 CHANGELOG = [
     {
+        "version": "1.0.45",
+        "notes": [
+            "Fixed everything Spotify going silently dead after long sessions "
+            "(blank panel, no art/volume, Discord quiet, Test/Authorize stuck "
+            "— while hotkeys still worked): after many hours of steady "
+            "polling Spotify starts rate-limiting the app, and the old retry "
+            "logic then SLEPT inside the request for however long Spotify "
+            "demanded — freezing the watcher, the Discord poster and the "
+            "authorize flow with no error anywhere. The app now backs off on "
+            "its own terms: it logs '[!] Spotify is rate-limiting the app', "
+            "pauses polling (up to 10 min), keeps the last known track on "
+            "screen, and recovers by itself. You stay signed in throughout.",
+            "Cut the API usage that provoked the limit: while the window is "
+            "hidden in the tray the panel's reader makes NO Spotify calls "
+            "(the Discord poster alone keeps things fed), and while visible "
+            "it reuses the poster's fetch instead of adding its own.",
+            "The [health] line now says 'np-tick STALLED' outright if the "
+            "watcher ever gets stuck inside a call again.",
+        ],
+    },
+    {
         "version": "1.0.44",
         "notes": [
             "Rebuilt the Mini player and Taskbar bar so they can never freeze "

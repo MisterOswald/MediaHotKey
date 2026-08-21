@@ -126,8 +126,14 @@ def _build_session():
     retry_kwargs = dict(
         total=3, connect=3, read=3,
         backoff_factor=0.4,
-        status_forcelist=[429, 500, 502, 503, 504],
-        respect_retry_after_header=True,
+        # 429 is deliberately NOT here, and Retry-After is NOT respected:
+        # honoring it makes urllib3 SLEEP inside the request for however long
+        # Spotify demands (hours on a hard rate limit) — which froze the
+        # now-playing watcher, the Discord poller and Test/Authorize all at
+        # once, with no timeout and no log. 429 now surfaces immediately and
+        # the app backs off on its own terms (see _current_cached).
+        status_forcelist=[500, 502, 503, 504],
+        respect_retry_after_header=False,
     )
     try:
         retries = Retry(allowed_methods=None, **retry_kwargs)
@@ -377,11 +383,33 @@ class Engine:
         pb, t = self._pb_cache
         now = time.time()
         if now < getattr(self, "_api_slow_until", 0):
-            max_age = max(max_age * 2, 10.0)
+            # Backing off (congestion or a rate limit) — serve the last known
+            # playback rather than hitting the API at all.
+            return pb if t else None
         if t and now - t < max_age:
             return pb
         t0 = time.perf_counter()
-        pb = self._ensure_spotify().current_playback(additional_types="episode")
+        try:
+            pb = self._ensure_spotify().current_playback(additional_types="episode")
+        except Exception as exc:  # noqa: BLE001
+            if (SPOTIPY_AVAILABLE
+                    and isinstance(exc, spotipy.exceptions.SpotifyException)
+                    and exc.http_status == 429):
+                retry_after = 60
+                try:
+                    retry_after = int((getattr(exc, "headers", None) or {})
+                                      .get("Retry-After", 60))
+                except (TypeError, ValueError):
+                    pass
+                pause = min(max(retry_after, 60), 600)
+                self._api_slow_until = now + pause
+                if now - getattr(self, "_rate_log_t", 0) > 300:
+                    self._rate_log_t = now
+                    self.log(f"[!] Spotify is rate-limiting the app (asked "
+                             f"to retry in {retry_after}s) — pausing Spotify "
+                             f"polling for {pause}s. You're still signed in; "
+                             "the panel will catch up by itself.")
+            raise
         dt = time.perf_counter() - t0
         if dt > 0.8:
             self._api_slow_until = now + 60
